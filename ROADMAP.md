@@ -59,7 +59,8 @@ Definition of done: a set of identity records that can generate fresh zero-progr
 - [x] Install the ESP Rust toolchain pieces required by the current `esp-hal`/`esp-wifi` stack for ESP32-S3.
 - [x] Start from an ESP32-S3 Rust template that already boots on your board, initializes logging, and has the right linker/memory configuration.
 - [x] Confirm the board can be flashed reliably over USB or UART.
-- [ ] Confirm native USB device mode is available on the board's exposed USB connector/pins. Avoid boards where the only USB connector is wired solely through a USB-UART bridge.
+- [x] Confirm native USB device mode is available on the board's exposed USB connector/pins. Avoid boards where the only USB connector is wired solely through a USB-UART bridge.
+    - Plug into "COM" for flashing, "USB" for USB device mode
 - [x] Blink an LED or print a serial log message as the first smoke test.
 - [x] Add the minimal async/runtime setup needed by the chosen HAL stack.
 

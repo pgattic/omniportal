@@ -55,3 +55,33 @@ To test GPIO48 instead:
 cargo build --release --no-default-features --features led-gpio-48
 espflash flash --monitor target/xtensa-esp32s3-none-elf/release/omniportal
 ```
+
+## Native USB Check
+
+This board has two USB-C connectors. One may be wired through a USB-UART bridge,
+while the other may expose the ESP32-S3 native USB peripheral. For the portal
+emulator, the native USB connector is the important one.
+
+On the host, watch USB events:
+
+```sh
+sudo dmesg -w
+```
+
+In another terminal, compare devices before and after plugging into each USB-C
+connector:
+
+```sh
+lsusb
+ls -l /dev/serial/by-id/
+```
+
+Useful signs:
+
+* `303a:1001` / `Espressif USB JTAG/serial debug unit` means the ESP32-S3
+  native USB peripheral is exposed.
+* `10c4:ea60` / `CP210x`, `1a86:55d4` / `CH343`, or similar means that connector
+  is a USB-UART bridge, not native USB device mode.
+
+If the native connector appears as an Espressif USB device, then the board has
+the wiring needed for later HID-device firmware.
