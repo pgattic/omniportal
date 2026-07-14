@@ -1,3 +1,4 @@
+#[cfg(not(test))]
 use embassy_time::{Duration, Timer};
 
 pub mod infinity;
@@ -8,6 +9,7 @@ pub fn init() {
     let _ = (infinity::VID, infinity::PID);
 }
 
+#[cfg(not(test))]
 #[embassy_executor::task]
 pub async fn run() {
     loop {

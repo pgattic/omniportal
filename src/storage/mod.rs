@@ -4,7 +4,9 @@ use crate::config;
 use crate::figures::formats::ImageFormat;
 use crate::figures::init::initialize_skylanders_placeholder;
 use crate::figures::{FigureKind, GameLine};
+#[cfg(not(test))]
 use crate::platform::println;
+#[cfg(not(test))]
 use crate::platform::StorageFlash;
 use crate::storage::records::{
     BackupBlob, BlobId, CharacterIdentity, CharacterInstance, FixedText, RecordId, StoredBlob,
@@ -17,6 +19,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use critical_section::Mutex;
+#[cfg(not(test))]
 use embassy_time::{Duration, Timer};
 
 pub mod records;
@@ -35,6 +38,41 @@ const RECORD_KIND_FORMAT_MARKER: u8 = 254;
 const ERASED_WORD: [u8; 4] = [0xff; 4];
 
 static STORE: Mutex<RefCell<Option<Store>>> = Mutex::new(RefCell::new(None));
+
+#[cfg(test)]
+struct StorageFlash {
+    bytes: Vec<u8>,
+}
+
+#[cfg(test)]
+impl StorageFlash {
+    fn new() -> Self {
+        let mut bytes = Vec::new();
+        bytes.resize(config::STORAGE_FLASH_BYTES as usize, 0xff);
+        Self { bytes }
+    }
+
+    fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), ()> {
+        let offset = offset as usize;
+        let end = offset.checked_add(bytes.len()).ok_or(())?;
+        bytes.copy_from_slice(self.bytes.get(offset..end).ok_or(())?);
+        Ok(())
+    }
+
+    fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), ()> {
+        let offset = offset as usize;
+        let end = offset.checked_add(bytes.len()).ok_or(())?;
+        let target = self.bytes.get_mut(offset..end).ok_or(())?;
+        target.copy_from_slice(bytes);
+        Ok(())
+    }
+
+    fn erase(&mut self, from: u32, to: u32) -> Result<(), ()> {
+        let range = self.bytes.get_mut(from as usize..to as usize).ok_or(())?;
+        range.fill(0xff);
+        Ok(())
+    }
+}
 
 pub fn init() {
     let _ = DEFAULT_COMMIT_DEBOUNCE_MS;
@@ -55,6 +93,7 @@ pub fn init() {
     });
 }
 
+#[cfg(not(test))]
 #[embassy_executor::task]
 pub async fn run() {
     loop {
@@ -1412,9 +1451,10 @@ fn align4(value: u32) -> u32 {
 
 fn query_param(query: &str, name: &str) -> Option<String> {
     for pair in query.split('&') {
-        let (key, value) = pair.split_once('=')?;
-        if key == name {
-            return Some(percent_decode(value));
+        if let Some((key, value)) = pair.split_once('=') {
+            if key == name {
+                return Some(percent_decode(value));
+            }
         }
     }
     None
@@ -1491,4 +1531,242 @@ fn option_record_id_json(value: Option<RecordId>) -> String {
     value
         .map(|value| format!("{}", value.0))
         .unwrap_or_else(|| String::from("null"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_identity() -> CharacterIdentity {
+        CharacterIdentity {
+            id: RecordId(7),
+            game_line: GameLine::Skylanders,
+            name: FixedText::from_str("Trigger Happy").unwrap(),
+            character_id: 21,
+            variant_id: Some(3),
+            kind: FigureKind::Character,
+            image_format: ImageFormat::SkylandersMifare1k,
+            source_notes: FixedText::from_str("seeded").unwrap(),
+            generation: 11,
+            checksum: 0x1234_5678,
+        }
+    }
+
+    fn test_instance() -> CharacterInstance {
+        CharacterInstance {
+            id: RecordId(8),
+            name: FixedText::from_str("Preston's Trigger Happy").unwrap(),
+            parent_identity_id: Some(RecordId(7)),
+            game_line: GameLine::Skylanders,
+            blob_id: BlobId(2),
+            image_format: ImageFormat::SkylandersMifare1k,
+            image_len: 1024,
+            image_crc32: 0xabcd_1234,
+            created_generation: 12,
+            updated_generation: 13,
+        }
+    }
+
+    fn test_backup() -> BackupBlob {
+        BackupBlob {
+            id: RecordId(9),
+            name: FixedText::from_str("Original backup").unwrap(),
+            game_line: Some(GameLine::Skylanders),
+            blob_id: BlobId(3),
+            image_format: ImageFormat::SkylandersMifare1k,
+            image_len: 1024,
+            image_crc32: 0xfeed_beef,
+            source_notes: FixedText::from_str("dumped").unwrap(),
+            generation: 14,
+        }
+    }
+
+    #[test]
+    fn decodes_form_params_and_numbers() {
+        assert_eq!(
+            query_param("name=Preston%27s+Trigger+Happy&character_id=0x15", "name")
+                .unwrap()
+                .as_str(),
+            "Preston's Trigger Happy"
+        );
+        assert_eq!(
+            query_param(
+                "name=Preston%27s+Trigger+Happy&character_id=0x15",
+                "character_id"
+            )
+            .and_then(|value| parse_u32(value.as_str())),
+            Some(21)
+        );
+        assert_eq!(
+            query_param("broken&name=ok", "name"),
+            Some(String::from("ok"))
+        );
+    }
+
+    #[test]
+    fn rejects_empty_and_oversized_record_text() {
+        assert!(FixedText::<8>::from_str("").is_err());
+        assert!(FixedText::<8>::from_str("123456789").is_err());
+        assert_eq!(
+            FixedText::<8>::from_str("Trigger").unwrap().as_str(),
+            "Trigger"
+        );
+    }
+
+    #[test]
+    fn journal_header_round_trips() {
+        let header = JournalHeader {
+            kind: RECORD_KIND_IDENTITY_UPSERT,
+            id: 7,
+            generation: 11,
+            payload_len: 176,
+            payload_crc: 0xdead_beef,
+        };
+
+        let decoded = JournalHeader::decode(&header.encode()).unwrap();
+
+        assert_eq!(decoded.kind, header.kind);
+        assert_eq!(decoded.id, header.id);
+        assert_eq!(decoded.generation, header.generation);
+        assert_eq!(decoded.payload_len, header.payload_len);
+        assert_eq!(decoded.payload_crc, header.payload_crc);
+    }
+
+    #[test]
+    fn identity_instance_and_backup_payloads_round_trip() {
+        let identity = test_identity();
+        let instance = test_instance();
+        let backup = test_backup();
+
+        assert_eq!(
+            decode_identity(
+                identity.id.0,
+                identity.generation,
+                &encode_identity(&identity)
+            ),
+            Some(identity)
+        );
+        assert_eq!(
+            decode_instance(
+                instance.id.0,
+                instance.updated_generation,
+                &encode_instance(&instance)
+            ),
+            Some(instance)
+        );
+        assert_eq!(
+            decode_backup(backup.id.0, backup.generation, &encode_backup(&backup)),
+            Some(backup)
+        );
+    }
+
+    #[test]
+    fn catalog_upsert_replace_delete_and_active_selection_behave() {
+        let mut catalog = Catalog::new();
+        let mut identity = test_identity();
+        catalog.upsert_identity(identity).unwrap();
+        assert_eq!(catalog.identity_count(), 1);
+
+        identity.name = FixedText::from_str("Renamed").unwrap();
+        catalog.upsert_identity(identity).unwrap();
+        assert_eq!(catalog.identity_count(), 1);
+        assert_eq!(
+            catalog.identity(identity.id).unwrap().name.as_str(),
+            "Renamed"
+        );
+
+        let instance = test_instance();
+        catalog.upsert_instance(instance).unwrap();
+        catalog.active_instance_id = Some(instance.id);
+        catalog.delete_instance(instance.id).unwrap();
+        assert_eq!(catalog.instance_count(), 0);
+        assert_eq!(catalog.active_instance_id, None);
+    }
+
+    #[test]
+    fn append_and_scan_flash_rebuilds_catalog_after_reboot() {
+        let mut flash = StorageFlash::new();
+        let mut catalog = Catalog::new();
+        let image = [0x42; 16];
+
+        append_record(
+            &mut flash,
+            &mut catalog,
+            RECORD_KIND_FORMAT_MARKER,
+            0,
+            1,
+            b"omniportal-storage-v1",
+        )
+        .unwrap();
+        append_record(
+            &mut flash,
+            &mut catalog,
+            RECORD_KIND_IDENTITY_UPSERT,
+            7,
+            2,
+            &encode_identity(&test_identity()),
+        )
+        .unwrap();
+        append_record(
+            &mut flash,
+            &mut catalog,
+            RECORD_KIND_BLOB_DATA,
+            2,
+            3,
+            &image,
+        )
+        .unwrap();
+        append_record(
+            &mut flash,
+            &mut catalog,
+            RECORD_KIND_INSTANCE_UPSERT,
+            8,
+            4,
+            &encode_instance(&test_instance()),
+        )
+        .unwrap();
+        append_config_record(&mut flash, &mut catalog, Some(RecordId(8)), 5).unwrap();
+
+        let used_bytes = catalog.write_offset;
+        let mut rebuilt = Catalog::new();
+        scan_flash(&mut flash, &mut rebuilt).unwrap();
+
+        assert_eq!(rebuilt.write_offset, used_bytes);
+        assert_eq!(
+            rebuilt.identity(RecordId(7)).unwrap().name.as_str(),
+            "Trigger Happy"
+        );
+        assert_eq!(
+            rebuilt.instance(RecordId(8)).unwrap().name.as_str(),
+            "Preston's Trigger Happy"
+        );
+        assert_eq!(rebuilt.blob(BlobId(2)).unwrap().len, image.len() as u32);
+        assert_eq!(rebuilt.active_instance_id, Some(RecordId(8)));
+        assert_eq!(rebuilt.next_record_id, 9);
+        assert_eq!(rebuilt.next_blob_id, 3);
+        assert_eq!(rebuilt.next_generation, 6);
+    }
+
+    #[test]
+    fn scan_flash_reports_corrupt_payload_crc() {
+        let mut flash = StorageFlash::new();
+        let mut catalog = Catalog::new();
+        append_record(
+            &mut flash,
+            &mut catalog,
+            RECORD_KIND_FORMAT_MARKER,
+            0,
+            1,
+            b"omniportal-storage-v1",
+        )
+        .unwrap();
+        flash.bytes[JOURNAL_RECORD_HEADER_BYTES] ^= 0x01;
+
+        let mut rebuilt = Catalog::new();
+        assert_eq!(
+            scan_flash(&mut flash, &mut rebuilt),
+            Err(StorageError::Corrupt)
+        );
+        assert_eq!(rebuilt.corrupt_records, 1);
+    }
 }

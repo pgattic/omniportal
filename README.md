@@ -24,6 +24,12 @@ Build the firmware:
 cargo build --release
 ```
 
+Run host-side unit tests:
+
+```sh
+cargo test -Z build-std=std --target "$(rustc -vV | sed -n 's/^host: //p')" --lib
+```
+
 Flash and monitor:
 
 ```sh

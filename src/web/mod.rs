@@ -1,7 +1,11 @@
+#[cfg(not(test))]
 use crate::platform::println;
+#[cfg(not(test))]
 use alloc::format;
 use alloc::string::String;
+#[cfg(not(test))]
 use embassy_net::{tcp::TcpSocket, Stack};
+#[cfg(not(test))]
 use embassy_time::{Duration, Timer};
 
 pub mod routes;
@@ -14,6 +18,7 @@ pub fn init() {
     let _ = ui_html::INDEX_HTML;
 }
 
+#[cfg(not(test))]
 #[embassy_executor::task]
 pub async fn run(stack: Stack<'static>) {
     stack.wait_config_up().await;
@@ -38,6 +43,7 @@ pub async fn run(stack: Stack<'static>) {
     }
 }
 
+#[cfg(not(test))]
 async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     let method = routes::request_method(request).unwrap_or("");
     let Some(target) = routes::request_target(request) else {
@@ -189,6 +195,7 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     }
 }
 
+#[cfg(not(test))]
 async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<usize, ()> {
     let mut read = socket.read(buffer).await.map_err(|_| ())?;
     loop {
@@ -260,6 +267,7 @@ fn content_length(request: &[u8]) -> Option<usize> {
     None
 }
 
+#[cfg(not(test))]
 async fn write_storage_result(
     socket: &mut TcpSocket<'_>,
     result: Result<String, crate::storage::StorageError>,
@@ -270,6 +278,7 @@ async fn write_storage_result(
     }
 }
 
+#[cfg(not(test))]
 async fn write_text(socket: &mut TcpSocket<'_>, status: &str, content_type: &str, body: &str) {
     let header = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -279,6 +288,7 @@ async fn write_text(socket: &mut TcpSocket<'_>, status: &str, content_type: &str
     write_all(socket, body.as_bytes()).await;
 }
 
+#[cfg(not(test))]
 async fn write_binary(socket: &mut TcpSocket<'_>, status: &str, content_type: &str, body: &[u8]) {
     let header = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -288,11 +298,65 @@ async fn write_binary(socket: &mut TcpSocket<'_>, status: &str, content_type: &s
     write_all(socket, body).await;
 }
 
+#[cfg(not(test))]
 async fn write_all(socket: &mut TcpSocket<'_>, mut bytes: &[u8]) {
     while !bytes.is_empty() {
         match socket.write(bytes).await {
             Ok(0) | Err(_) => break,
             Ok(written) => bytes = &bytes[written..],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::web::routes;
+
+    #[test]
+    fn parses_method_and_target_from_request_line() {
+        let request =
+            b"POST /api/identity/create?name=Trigger+Happy HTTP/1.1\r\nHost: portal\r\n\r\n";
+
+        assert_eq!(routes::request_method(request), Some("POST"));
+        assert_eq!(
+            routes::request_target(request),
+            Some("/api/identity/create?name=Trigger+Happy")
+        );
+    }
+
+    #[test]
+    fn splits_path_and_query() {
+        assert_eq!(
+            split_target("/api/identity/create?name=Trigger+Happy"),
+            ("/api/identity/create", "name=Trigger+Happy")
+        );
+        assert_eq!(split_target("/status"), ("/status", ""));
+    }
+
+    #[test]
+    fn extracts_content_length_case_insensitively() {
+        let request = b"POST /api/identity/create HTTP/1.1\r\nhost: portal\r\ncontent-length: 35\r\n\r\nignored";
+
+        assert_eq!(content_length(request), Some(35));
+    }
+
+    #[test]
+    fn extracts_request_body_after_header_separator() {
+        let request = b"POST /api/identity/create HTTP/1.1\r\nContent-Length: 32\r\n\r\nname=Trigger+Happy&character_id=21";
+
+        assert_eq!(
+            request_body(request),
+            Some(&b"name=Trigger+Happy&character_id=21"[..])
+        );
+    }
+
+    #[test]
+    fn prefers_query_params_over_body_params() {
+        assert_eq!(params("id=7", b"id=9&name=ignored").as_str(), "id=7");
+        assert_eq!(
+            params("", b"name=Preston%27s+Trigger+Happy").as_str(),
+            "name=Preston%27s+Trigger+Happy"
+        );
     }
 }
