@@ -54,6 +54,9 @@ the entry point:
 The USB subsystem task is intentionally idle for now. WiFi/Web are active, and
 storage scans a flash-backed append-only journal at boot.
 
+The planned USB target behavior is documented in
+[`docs/usb-target.md`](docs/usb-target.md).
+
 ## WiFi AP Smoke Test
 
 The firmware starts an open access point with DHCP:
