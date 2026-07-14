@@ -120,11 +120,11 @@ Definition of done: phone connects to the ESP32-S3's own open WiFi network and l
   - Figure instance: named playable image generated from an identity or uploaded directly, mutable binary data, parent identity ID if any, creation/update timestamps or monotonic counters if available, checksum.
   - Backup/import blob: optional raw dump file preserved for archival/export compatibility.
 - [x] Add upload/download endpoints for identity records.
-- [ ] Add upload endpoints for direct instance/backup binary files.
-- [ ] Add download endpoints for exact binary export of instances/backups.
-- [ ] Add list/delete/rename endpoints for identities, instances, and backups.
+- [x] Add upload endpoints for direct instance/backup binary files.
+- [x] Add download endpoints for exact binary export of instances/backups.
+- [x] Add list/delete/rename endpoints for identities, instances, and backups.
 - [ ] Add "create fresh instance from identity" support that runs the proper initializer and creates a user-named mutable instance with zero-progress/default-progress state.
-- [ ] Add "clone instance" support that copies an existing mutable image when the user wants another save slot from the same current state.
+- [x] Add "clone instance" support that copies an existing mutable image when the user wants another save slot from the same current state.
 - [x] Add a small integrity check at boot: scan records, reject corrupt entries, expose storage status in `/status`.
 - [ ] Confirm uploads survive reboot and power loss during a non-active upload.
 

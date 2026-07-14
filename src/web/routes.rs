@@ -15,3 +15,9 @@ pub fn request_target(request: &[u8]) -> Option<&str> {
     let _method = parts.next()?;
     parts.next()
 }
+
+pub fn request_method(request: &[u8]) -> Option<&str> {
+    let request = core::str::from_utf8(request).ok()?;
+    let first_line = request.lines().next()?;
+    first_line.split_whitespace().next()
+}

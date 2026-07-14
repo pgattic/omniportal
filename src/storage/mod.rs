@@ -30,6 +30,7 @@ const RECORD_KIND_INSTANCE_DELETE: u8 = 4;
 const RECORD_KIND_BACKUP_UPSERT: u8 = 5;
 const RECORD_KIND_BACKUP_DELETE: u8 = 6;
 const RECORD_KIND_BLOB_DATA: u8 = 7;
+const RECORD_KIND_CONFIG_UPSERT: u8 = 8;
 const RECORD_KIND_FORMAT_MARKER: u8 = 254;
 
 const ERASED_WORD: [u8; 4] = [0xff; 4];
@@ -70,6 +71,57 @@ pub fn status_json() -> String {
 pub fn library_json() -> String {
     with_store(|store| store.catalog.library_json())
         .unwrap_or_else(|| String::from("{\"error\":\"storage uninitialized\"}"))
+}
+
+pub fn identity_json(id: RecordId) -> Result<String, StorageError> {
+    with_store(|store| {
+        store
+            .catalog
+            .identity(id)
+            .map(|identity| {
+                format!(
+                    "{{\"id\":{},\"game\":\"{}\",\"name\":\"{}\",\"character_id\":{},\"variant_id\":{},\"kind\":\"{}\",\"format\":\"{}\",\"source\":\"{}\"}}\n",
+                    identity.id.0,
+                    identity.game_line.wire_name(),
+                    json_escape(identity.name.as_str()),
+                    identity.character_id,
+                    option_u32_json(identity.variant_id),
+                    identity.kind.wire_name(),
+                    identity.image_format.wire_name(),
+                    json_escape(identity.source_notes.as_str())
+                )
+            })
+            .ok_or(StorageError::NotFound)
+    })
+    .ok_or(StorageError::Uninitialized)?
+}
+
+pub fn backup_json(id: RecordId) -> Result<String, StorageError> {
+    with_store(|store| {
+        store
+            .catalog
+            .backup(id)
+            .map(|backup| {
+                format!(
+                    "{{\"id\":{},\"name\":\"{}\",\"game\":\"{}\",\"blob_id\":{},\"format\":\"{}\",\"image_len\":{},\"crc32\":{},\"source\":\"{}\"}}\n",
+                    backup.id.0,
+                    json_escape(backup.name.as_str()),
+                    backup.game_line.map(|game| game.wire_name()).unwrap_or("unknown"),
+                    backup.blob_id.0,
+                    backup.image_format.wire_name(),
+                    backup.image_len,
+                    backup.image_crc32,
+                    json_escape(backup.source_notes.as_str())
+                )
+            })
+            .ok_or(StorageError::NotFound)
+    })
+    .ok_or(StorageError::Uninitialized)?
+}
+
+pub fn active_instance_json() -> String {
+    with_store(|store| option_record_id_json(store.catalog.active_instance_id))
+        .unwrap_or_else(|| String::from("null"))
 }
 
 pub fn create_identity_from_query(query: &str) -> Result<String, StorageError> {
@@ -117,6 +169,10 @@ pub fn create_identity_from_query(query: &str) -> Result<String, StorageError> {
     })
 }
 
+pub fn create_identity_from_params(params: &str) -> Result<String, StorageError> {
+    create_identity_from_query(params)
+}
+
 pub fn create_instance_from_query(query: &str) -> Result<String, StorageError> {
     let identity_id = query_param(query, "identity_id")
         .and_then(|value| parse_u32(value.as_str()))
@@ -129,16 +185,7 @@ pub fn create_instance_from_query(query: &str) -> Result<String, StorageError> {
             .identity(RecordId(identity_id))
             .ok_or(StorageError::NotFound)?;
         let image = initialize_skylanders_placeholder(identity.character_id, identity.variant_id);
-        let blob_id = store.catalog.next_blob_id();
-        let blob_generation = store.catalog.next_generation();
-        append_record(
-            &mut store.flash,
-            &mut store.catalog,
-            RECORD_KIND_BLOB_DATA,
-            blob_id.0,
-            blob_generation,
-            &image,
-        )?;
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image)?;
 
         let image_crc32 = crc32(&image);
         let instance_id = store.catalog.next_record_id();
@@ -155,21 +202,133 @@ pub fn create_instance_from_query(query: &str) -> Result<String, StorageError> {
             created_generation: instance_generation,
             updated_generation: instance_generation,
         };
-        let payload = encode_instance(&instance);
-        append_record(
-            &mut store.flash,
-            &mut store.catalog,
-            RECORD_KIND_INSTANCE_UPSERT,
-            instance_id.0,
-            instance_generation,
-            &payload,
-        )?;
-        store.catalog.upsert_instance(instance)?;
+        append_instance_record(store, instance)?;
         Ok(format!(
             "{{\"created\":\"instance\",\"id\":{},\"blob_id\":{},\"name\":\"{}\"}}\n",
             instance_id.0,
             blob_id.0,
             json_escape(instance.name.as_str())
+        ))
+    })
+}
+
+pub fn create_instance_from_params(params: &str) -> Result<String, StorageError> {
+    create_instance_from_query(params)
+}
+
+pub fn upload_instance_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
+    let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
+    let identity_id =
+        query_param(params, "identity_id").and_then(|value| parse_u32(value.as_str()));
+    if image.is_empty() {
+        return Err(StorageError::BadRequest);
+    }
+
+    with_store_mut(|store| {
+        let identity = identity_id.and_then(|id| store.catalog.identity(RecordId(id)));
+        let game_line = identity
+            .map(|item| item.game_line)
+            .unwrap_or(GameLine::Skylanders);
+        let image_format = identity
+            .map(|item| item.image_format)
+            .unwrap_or(ImageFormat::SkylandersMifare1k);
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
+        let image_crc32 = crc32(image);
+        let instance_id = store.catalog.next_record_id();
+        let generation = store.catalog.next_generation();
+        let instance = CharacterInstance {
+            id: instance_id,
+            name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
+            parent_identity_id: identity.map(|item| item.id),
+            game_line,
+            blob_id,
+            image_format,
+            image_len: image.len() as u32,
+            image_crc32,
+            created_generation: generation,
+            updated_generation: generation,
+        };
+        append_instance_record(store, instance)?;
+        Ok(format!(
+            "{{\"uploaded\":\"instance\",\"id\":{},\"blob_id\":{},\"name\":\"{}\"}}\n",
+            instance_id.0,
+            blob_id.0,
+            json_escape(instance.name.as_str())
+        ))
+    })
+}
+
+pub fn upload_backup_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
+    let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
+    let source = query_param(params, "source").unwrap_or_default();
+    if image.is_empty() {
+        return Err(StorageError::BadRequest);
+    }
+
+    with_store_mut(|store| {
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
+        let id = store.catalog.next_record_id();
+        let generation = store.catalog.next_generation();
+        let backup = BackupBlob {
+            id,
+            name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
+            game_line: Some(GameLine::Skylanders),
+            blob_id,
+            image_format: ImageFormat::SkylandersMifare1k,
+            image_len: image.len() as u32,
+            image_crc32: crc32(image),
+            source_notes: if source.is_empty() {
+                FixedText::empty()
+            } else {
+                FixedText::from_str(&source).map_err(|_| StorageError::BadRequest)?
+            },
+            generation,
+        };
+        append_backup_record(store, backup)?;
+        Ok(format!(
+            "{{\"uploaded\":\"backup\",\"id\":{},\"blob_id\":{},\"name\":\"{}\"}}\n",
+            id.0,
+            blob_id.0,
+            json_escape(backup.name.as_str())
+        ))
+    })
+}
+
+pub fn clone_instance_from_params(params: &str) -> Result<String, StorageError> {
+    let source_id = query_param(params, "source_id")
+        .or_else(|| query_param(params, "id"))
+        .and_then(|value| parse_u32(value.as_str()))
+        .ok_or(StorageError::BadRequest)?;
+    let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
+
+    with_store_mut(|store| {
+        let source = store
+            .catalog
+            .instance(RecordId(source_id))
+            .ok_or(StorageError::NotFound)?;
+        let image = read_blob(store, source.blob_id)?;
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image)?;
+        let id = store.catalog.next_record_id();
+        let generation = store.catalog.next_generation();
+        let clone = CharacterInstance {
+            id,
+            name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
+            parent_identity_id: source.parent_identity_id,
+            game_line: source.game_line,
+            blob_id,
+            image_format: source.image_format,
+            image_len: source.image_len,
+            image_crc32: source.image_crc32,
+            created_generation: generation,
+            updated_generation: generation,
+        };
+        append_instance_record(store, clone)?;
+        Ok(format!(
+            "{{\"cloned\":\"instance\",\"source_id\":{},\"id\":{},\"blob_id\":{},\"name\":\"{}\"}}\n",
+            source_id,
+            id.0,
+            blob_id.0,
+            json_escape(clone.name.as_str())
         ))
     })
 }
@@ -183,6 +342,32 @@ pub fn delete_identity_from_query(query: &str) -> Result<String, StorageError> {
     )
 }
 
+pub fn rename_identity_from_query(query: &str) -> Result<String, StorageError> {
+    let id = query_param(query, "id")
+        .and_then(|value| parse_u32(value.as_str()))
+        .ok_or(StorageError::BadRequest)?;
+    let name = query_param(query, "name").ok_or(StorageError::BadRequest)?;
+
+    with_store_mut(|store| {
+        let mut identity = store
+            .catalog
+            .identity(RecordId(id))
+            .ok_or(StorageError::NotFound)?;
+        identity.name = FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?;
+        identity.generation = store.catalog.next_generation();
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_IDENTITY_UPSERT,
+            id,
+            identity.generation,
+            &encode_identity(&identity),
+        )?;
+        store.catalog.upsert_identity(identity)?;
+        Ok(format!("{{\"renamed\":\"identity\",\"id\":{}}}\n", id))
+    })
+}
+
 pub fn delete_instance_from_query(query: &str) -> Result<String, StorageError> {
     delete_record_from_query(
         query,
@@ -190,6 +375,12 @@ pub fn delete_instance_from_query(query: &str) -> Result<String, StorageError> {
         RECORD_KIND_INSTANCE_DELETE,
         |catalog, id| catalog.delete_instance(id),
     )
+}
+
+pub fn delete_backup_from_query(query: &str) -> Result<String, StorageError> {
+    delete_record_from_query(query, "backup", RECORD_KIND_BACKUP_DELETE, |catalog, id| {
+        catalog.delete_backup(id)
+    })
 }
 
 pub fn rename_instance_from_query(query: &str) -> Result<String, StorageError> {
@@ -219,6 +410,24 @@ pub fn rename_instance_from_query(query: &str) -> Result<String, StorageError> {
     })
 }
 
+pub fn rename_backup_from_query(query: &str) -> Result<String, StorageError> {
+    let id = query_param(query, "id")
+        .and_then(|value| parse_u32(value.as_str()))
+        .ok_or(StorageError::BadRequest)?;
+    let name = query_param(query, "name").ok_or(StorageError::BadRequest)?;
+
+    with_store_mut(|store| {
+        let mut backup = store
+            .catalog
+            .backup(RecordId(id))
+            .ok_or(StorageError::NotFound)?;
+        backup.name = FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?;
+        backup.generation = store.catalog.next_generation();
+        append_backup_record(store, backup)?;
+        Ok(format!("{{\"renamed\":\"backup\",\"id\":{}}}\n", id))
+    })
+}
+
 pub fn read_instance_blob(instance_id: RecordId) -> Result<Vec<u8>, StorageError> {
     with_store_mut(|store| {
         let instance = store
@@ -226,6 +435,174 @@ pub fn read_instance_blob(instance_id: RecordId) -> Result<Vec<u8>, StorageError
             .instance(instance_id)
             .ok_or(StorageError::NotFound)?;
         read_blob(store, instance.blob_id)
+    })
+}
+
+pub fn read_backup_blob(backup_id: RecordId) -> Result<Vec<u8>, StorageError> {
+    with_store_mut(|store| {
+        let backup = store
+            .catalog
+            .backup(backup_id)
+            .ok_or(StorageError::NotFound)?;
+        read_blob(store, backup.blob_id)
+    })
+}
+
+pub fn select_instance_from_params(params: &str) -> Result<String, StorageError> {
+    let id = query_param(params, "id")
+        .and_then(|value| parse_u32(value.as_str()))
+        .ok_or(StorageError::BadRequest)?;
+
+    with_store_mut(|store| {
+        let id = RecordId(id);
+        if store.catalog.instance(id).is_none() {
+            return Err(StorageError::NotFound);
+        }
+        let generation = store.catalog.next_generation();
+        append_config_record(&mut store.flash, &mut store.catalog, Some(id), generation)?;
+        store.catalog.active_instance_id = Some(id);
+        Ok(format!("{{\"active_instance_id\":{}}}\n", id.0))
+    })
+}
+
+pub fn clear_active_instance() -> Result<String, StorageError> {
+    with_store_mut(|store| {
+        let generation = store.catalog.next_generation();
+        append_config_record(&mut store.flash, &mut store.catalog, None, generation)?;
+        store.catalog.active_instance_id = None;
+        Ok(String::from("{\"active_instance_id\":null}\n"))
+    })
+}
+
+pub fn compact_storage() -> Result<String, StorageError> {
+    with_store_mut(|store| {
+        let mut blob_ids = Vec::new();
+        for blob in store.catalog.blobs.iter().flatten() {
+            let is_live_instance = store
+                .catalog
+                .instances
+                .iter()
+                .flatten()
+                .any(|instance| instance.blob_id == blob.id);
+            let is_live_backup = store
+                .catalog
+                .backups
+                .iter()
+                .flatten()
+                .any(|backup| backup.blob_id == blob.id);
+            if is_live_instance || is_live_backup {
+                blob_ids.push(blob.id);
+            }
+        }
+        let mut blobs = Vec::new();
+        for blob_id in blob_ids {
+            blobs.push((blob_id, read_blob(store, blob_id)?));
+        }
+
+        let identities = store.catalog.identities;
+        let instances = store.catalog.instances;
+        let backups = store.catalog.backups;
+        let active_instance_id = store.catalog.active_instance_id;
+        let next_record_id = store.catalog.next_record_id;
+        let next_blob_id = store.catalog.next_blob_id;
+        let mut generation = store.catalog.next_generation;
+
+        store
+            .flash
+            .erase(
+                config::STORAGE_FLASH_OFFSET,
+                config::STORAGE_FLASH_OFFSET + config::STORAGE_FLASH_BYTES,
+            )
+            .map_err(|_| StorageError::Flash)?;
+        store.catalog = Catalog::new();
+        store.catalog.next_record_id = next_record_id;
+        store.catalog.next_blob_id = next_blob_id;
+        store.catalog.next_generation = generation;
+
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_FORMAT_MARKER,
+            0,
+            generation,
+            b"omniportal-storage-v1",
+        )?;
+        generation += 1;
+
+        for (blob_id, image) in blobs {
+            append_record(
+                &mut store.flash,
+                &mut store.catalog,
+                RECORD_KIND_BLOB_DATA,
+                blob_id.0,
+                generation,
+                &image,
+            )?;
+            store.catalog.upsert_blob(StoredBlob {
+                id: blob_id,
+                offset: store.catalog.write_offset
+                    - align4(JOURNAL_RECORD_HEADER_BYTES as u32 + image.len() as u32)
+                    + JOURNAL_RECORD_HEADER_BYTES as u32,
+                len: image.len() as u32,
+                crc32: crc32(&image),
+                generation,
+            })?;
+            generation += 1;
+        }
+
+        for identity in identities.iter().flatten().copied() {
+            let mut identity = identity;
+            identity.generation = generation;
+            append_record(
+                &mut store.flash,
+                &mut store.catalog,
+                RECORD_KIND_IDENTITY_UPSERT,
+                identity.id.0,
+                generation,
+                &encode_identity(&identity),
+            )?;
+            store.catalog.upsert_identity(identity)?;
+            generation += 1;
+        }
+
+        for instance in instances.iter().flatten().copied() {
+            let mut instance = instance;
+            instance.updated_generation = generation;
+            append_record(
+                &mut store.flash,
+                &mut store.catalog,
+                RECORD_KIND_INSTANCE_UPSERT,
+                instance.id.0,
+                generation,
+                &encode_instance(&instance),
+            )?;
+            store.catalog.upsert_instance(instance)?;
+            generation += 1;
+        }
+
+        for backup in backups.iter().flatten().copied() {
+            let mut backup = backup;
+            backup.generation = generation;
+            append_backup_record(store, backup)?;
+            generation += 1;
+        }
+
+        if let Some(active) = active_instance_id {
+            append_config_record(
+                &mut store.flash,
+                &mut store.catalog,
+                Some(active),
+                generation,
+            )?;
+            store.catalog.active_instance_id = Some(active);
+            generation += 1;
+        }
+
+        store.catalog.next_generation = generation;
+        Ok(format!(
+            "{{\"compacted\":true,\"used_bytes\":{}}}\n",
+            store.catalog.write_offset
+        ))
     })
 }
 
@@ -347,6 +724,7 @@ struct Catalog {
     instances: [Option<CharacterInstance>; MAX_INSTANCES],
     backups: [Option<BackupBlob>; MAX_BACKUPS],
     blobs: [Option<StoredBlob>; MAX_INSTANCES + MAX_BACKUPS],
+    active_instance_id: Option<RecordId>,
     write_offset: u32,
     next_record_id: u32,
     next_blob_id: u32,
@@ -361,6 +739,7 @@ impl Catalog {
             instances: [None; MAX_INSTANCES],
             backups: [None; MAX_BACKUPS],
             blobs: [None; MAX_INSTANCES + MAX_BACKUPS],
+            active_instance_id: None,
             write_offset: 0,
             next_record_id: 1,
             next_blob_id: 1,
@@ -413,6 +792,14 @@ impl Catalog {
             .copied()
     }
 
+    fn backup(&self, id: RecordId) -> Option<BackupBlob> {
+        self.backups
+            .iter()
+            .flatten()
+            .find(|item| item.id == id)
+            .copied()
+    }
+
     fn blob(&self, id: BlobId) -> Option<StoredBlob> {
         self.blobs
             .iter()
@@ -442,7 +829,14 @@ impl Catalog {
     }
 
     fn delete_instance(&mut self, id: RecordId) -> Result<(), StorageError> {
+        if self.active_instance_id == Some(id) {
+            self.active_instance_id = None;
+        }
         delete_by_id(&mut self.instances, |item| item.id, id)
+    }
+
+    fn delete_backup(&mut self, id: RecordId) -> Result<(), StorageError> {
+        delete_by_id(&mut self.backups, |item| item.id, id)
     }
 
     fn identity_count(&self) -> usize {
@@ -459,10 +853,11 @@ impl Catalog {
 
     fn status_json(&self) -> String {
         format!(
-            "{{\"storage\":\"ok\",\"identities\":{},\"instances\":{},\"backups\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
+            "{{\"storage\":\"ok\",\"identities\":{},\"instances\":{},\"backups\":{},\"active_instance_id\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
             self.identity_count(),
             self.instance_count(),
             self.backup_count(),
+            option_record_id_json(self.active_instance_id),
             self.write_offset,
             config::STORAGE_FLASH_BYTES,
             self.corrupt_records
@@ -506,7 +901,26 @@ impl Catalog {
                 instance.image_crc32
             ));
         }
-        out.push_str("],\"backups\":[]}\n");
+        out.push_str("],\"backups\":[");
+        first = true;
+        for backup in self.backups.iter().flatten() {
+            if !first {
+                out.push(',');
+            }
+            first = false;
+            out.push_str(&format!(
+                "{{\"id\":{},\"name\":\"{}\",\"game\":\"{}\",\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
+                backup.id.0,
+                json_escape(backup.name.as_str()),
+                backup.game_line.map(|game| game.wire_name()).unwrap_or("unknown"),
+                backup.blob_id.0,
+                backup.image_len,
+                backup.image_crc32
+            ));
+        }
+        out.push_str("],\"active_instance_id\":");
+        out.push_str(&option_record_id_json(self.active_instance_id));
+        out.push_str("}\n");
         out
     }
 }
@@ -632,6 +1046,7 @@ fn apply_record(
         }
         RECORD_KIND_BACKUP_DELETE => {
             catalog.observe_record_id(record.id, record.generation);
+            let _ = catalog.delete_backup(RecordId(record.id));
         }
         RECORD_KIND_BLOB_DATA => {
             catalog.observe_blob_id(record.id, record.generation);
@@ -646,9 +1061,82 @@ fn apply_record(
         RECORD_KIND_FORMAT_MARKER => {
             catalog.next_generation = catalog.next_generation.max(record.generation + 1);
         }
+        RECORD_KIND_CONFIG_UPSERT => {
+            catalog.next_generation = catalog.next_generation.max(record.generation + 1);
+            catalog.active_instance_id = decode_config(payload);
+        }
         _ => {}
     }
     Ok(())
+}
+
+fn append_blob(
+    flash: &mut FlashStorage,
+    catalog: &mut Catalog,
+    image: &[u8],
+) -> Result<BlobId, StorageError> {
+    let blob_id = catalog.next_blob_id();
+    let generation = catalog.next_generation();
+    let payload_offset = catalog.write_offset + JOURNAL_RECORD_HEADER_BYTES as u32;
+    append_record(
+        flash,
+        catalog,
+        RECORD_KIND_BLOB_DATA,
+        blob_id.0,
+        generation,
+        image,
+    )?;
+    catalog.upsert_blob(StoredBlob {
+        id: blob_id,
+        offset: payload_offset,
+        len: image.len() as u32,
+        crc32: crc32(image),
+        generation,
+    })?;
+    Ok(blob_id)
+}
+
+fn append_instance_record(
+    store: &mut Store,
+    instance: CharacterInstance,
+) -> Result<(), StorageError> {
+    append_record(
+        &mut store.flash,
+        &mut store.catalog,
+        RECORD_KIND_INSTANCE_UPSERT,
+        instance.id.0,
+        instance.updated_generation,
+        &encode_instance(&instance),
+    )?;
+    store.catalog.upsert_instance(instance)
+}
+
+fn append_backup_record(store: &mut Store, backup: BackupBlob) -> Result<(), StorageError> {
+    append_record(
+        &mut store.flash,
+        &mut store.catalog,
+        RECORD_KIND_BACKUP_UPSERT,
+        backup.id.0,
+        backup.generation,
+        &encode_backup(&backup),
+    )?;
+    store.catalog.upsert_backup(backup)
+}
+
+fn append_config_record(
+    flash: &mut FlashStorage,
+    catalog: &mut Catalog,
+    active_instance_id: Option<RecordId>,
+    generation: u32,
+) -> Result<(), StorageError> {
+    append_record(
+        flash,
+        catalog,
+        RECORD_KIND_CONFIG_UPSERT,
+        0,
+        generation,
+        &encode_config(active_instance_id),
+    )
 }
 
 fn append_record(
@@ -833,8 +1321,78 @@ fn decode_instance(id: u32, _generation: u32, payload: &[u8]) -> Option<Characte
     })
 }
 
-fn decode_backup(_id: u32, _generation: u32, _payload: &[u8]) -> Option<BackupBlob> {
-    None
+fn encode_backup(backup: &BackupBlob) -> [u8; 192] {
+    let mut out = [0; 192];
+    out[0] = backup.game_line.map(|game| game.as_u8()).unwrap_or(0);
+    out[1] = backup.image_format.as_u8();
+    out[2] = backup.name.len() as u8;
+    out[3] = backup.source_notes.len() as u8;
+    out[4..8].copy_from_slice(&backup.blob_id.0.to_le_bytes());
+    out[8..12].copy_from_slice(&backup.image_len.to_le_bytes());
+    out[12..16].copy_from_slice(&backup.image_crc32.to_le_bytes());
+    out[16..20].copy_from_slice(&backup.generation.to_le_bytes());
+    out[24..24 + backup.name.len()].copy_from_slice(backup.name.raw_bytes());
+    let source_start = 24 + MAX_RECORD_NAME_BYTES;
+    out[source_start..source_start + backup.source_notes.len()]
+        .copy_from_slice(backup.source_notes.raw_bytes());
+    out
+}
+
+fn decode_backup(id: u32, generation: u32, payload: &[u8]) -> Option<BackupBlob> {
+    if payload.len() < 192 {
+        return None;
+    }
+    let name_len = payload[2] as usize;
+    let source_len = payload[3] as usize;
+    let source_start = 24 + MAX_RECORD_NAME_BYTES;
+    if name_len > MAX_RECORD_NAME_BYTES
+        || source_len > crate::storage::records::MAX_SOURCE_NOTES_BYTES
+        || 24 + name_len > source_start
+        || source_start + source_len > payload.len()
+    {
+        return None;
+    }
+
+    let name = core::str::from_utf8(&payload[24..24 + name_len]).ok()?;
+    let source = if source_len == 0 {
+        FixedText::empty()
+    } else {
+        FixedText::from_str(
+            core::str::from_utf8(&payload[source_start..source_start + source_len]).ok()?,
+        )
+        .ok()?
+    };
+
+    Some(BackupBlob {
+        id: RecordId(id),
+        name: FixedText::from_str(name).ok()?,
+        game_line: if payload[0] == 0 {
+            None
+        } else {
+            Some(GameLine::from_u8(payload[0])?)
+        },
+        image_format: ImageFormat::from_u8(payload[1])?,
+        blob_id: BlobId(u32::from_le_bytes(payload[4..8].try_into().ok()?)),
+        image_len: u32::from_le_bytes(payload[8..12].try_into().ok()?),
+        image_crc32: u32::from_le_bytes(payload[12..16].try_into().ok()?),
+        source_notes: source,
+        generation,
+    })
+}
+
+fn encode_config(active_instance_id: Option<RecordId>) -> [u8; 8] {
+    let mut out = [0; 8];
+    out[0] = u8::from(active_instance_id.is_some());
+    out[4..8].copy_from_slice(&active_instance_id.map(|id| id.0).unwrap_or(0).to_le_bytes());
+    out
+}
+
+fn decode_config(payload: &[u8]) -> Option<RecordId> {
+    if payload.len() < 8 || payload[0] == 0 {
+        None
+    } else {
+        Some(RecordId(u32::from_le_bytes(payload[4..8].try_into().ok()?)))
+    }
 }
 
 pub fn crc32(bytes: &[u8]) -> u32 {
@@ -927,5 +1485,11 @@ fn json_escape(value: &str) -> String {
 fn option_u32_json(value: Option<u32>) -> String {
     value
         .map(|value| format!("{}", value))
+        .unwrap_or_else(|| String::from("null"))
+}
+
+fn option_record_id_json(value: Option<RecordId>) -> String {
+    value
+        .map(|value| format!("{}", value.0))
         .unwrap_or_else(|| String::from("null"))
 }
