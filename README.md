@@ -69,8 +69,28 @@ the entry point:
 * `state.rs` - shared mode/selection state
 * `config.rs` - build-time constants
 
-The stub subsystem tasks are intentionally idle for now; the GPIO blinky remains
-the runtime smoke test.
+The storage and USB subsystem tasks are intentionally idle for now. WiFi/Web are
+active for the AP smoke test, and the GPIO blinky remains the hardware runtime
+smoke test.
+
+## WiFi AP Smoke Test
+
+The firmware starts an open access point:
+
+* SSID: `Portal-Emulator`
+* device IP: `192.168.4.1`
+* HTTP: `http://192.168.4.1/`
+* status JSON: `http://192.168.4.1/status`
+
+DHCP is not implemented yet. Configure the client manually:
+
+* IP address: `192.168.4.2`
+* netmask: `255.255.255.0`
+* gateway/router: `192.168.4.1`
+* DNS: leave blank or use `192.168.4.1`
+
+After connecting, the root page should show `Hello from ESP32-S3`, and
+`/status` should return hardcoded JSON.
 
 ## Native USB Check
 

@@ -1,1 +1,2 @@
-pub const INDEX_HTML: &str = "";
+pub const INDEX_HTML: &str = "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>OmniPortal</title></head><body><h1>OmniPortal</h1><p>Hello from ESP32-S3.</p><p><a href=\"/status\">Status JSON</a></p></body></html>";
+pub const INDEX_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>OmniPortal</title></head><body><h1>OmniPortal</h1><p>Hello from ESP32-S3.</p><p><a href=\"/status\">Status JSON</a></p></body></html>";

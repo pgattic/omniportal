@@ -102,13 +102,13 @@ Definition of done: project compiles with empty/stub modules wired together; tas
 
 ### Phase A — Open WiFi AP + Web Server Bring-Up (no USB yet)
 
-- [ ] Bring up ESP32-S3 WiFi in AP mode.
-- [ ] Use an open network for simplest phone access, for example SSID `Portal-Emulator`, no password.
-- [ ] Assign the device a predictable AP-side IP, for example `192.168.4.1`.
-- [ ] Enable DHCP for clients if the networking stack supports it directly. If DHCP is awkward in the first pass, document the phone's required manual IP settings and treat real DHCP as a follow-up task.
-- [ ] Stand up a minimal async HTTP server serving a single static "Hello" page.
+- [x] Bring up ESP32-S3 WiFi in AP mode.
+- [x] Use an open network for simplest phone access, for example SSID `Portal-Emulator`, no password.
+- [x] Assign the device a predictable AP-side IP, for example `192.168.4.1`.
+- [x] Enable DHCP for clients if the networking stack supports it directly. If DHCP is awkward in the first pass, document the phone's required manual IP settings and treat real DHCP as a follow-up task.
+- [x] Stand up a minimal async HTTP server serving a single static "Hello" page.
 - [ ] Connect a phone directly to the ESP32-S3 AP and load the page.
-- [ ] Add a `/status` JSON endpoint returning a hardcoded placeholder (e.g. current mode, current figure).
+- [x] Add a `/status` JSON endpoint returning a hardcoded placeholder (e.g. current mode, current figure).
 
 Definition of done: phone connects to the ESP32-S3's own open WiFi network and loads a page served entirely by the device.
 
