@@ -11,7 +11,7 @@ led-gpio-48 = []
 
 [dependencies]
 embassy-executor = { version = "0.7", features = ["arch-spin", "executor-thread", "task-arena-size-32768"] }
-embassy-net = { version = "0.9.1", features = ["medium-ethernet", "proto-ipv4", "tcp", "log"] }
+embassy-net = { version = "0.9.1", features = ["medium-ethernet", "proto-ipv4", "tcp", "udp", "log"] }
 embassy-time = "0.4"
 esp-alloc = "0.8.0"
 esp-backtrace = { version = "0.16", features = ["esp32s3", "panic-handler", "println"] }

@@ -61,7 +61,8 @@ espflash flash --monitor target/xtensa-esp32s3-none-elf/release/omniportal
 The firmware is currently a single binary crate with subsystem stubs wired into
 the entry point:
 
-* `wifi.rs` - future ESP32-S3 AP/network bring-up
+* `wifi.rs` - ESP32-S3 AP bring-up
+* `dhcp.rs` - small DHCPv4 server for AP clients
 * `web/` - future HTTP routes and embedded UI
 * `usb/` - future portal USB device modes
 * `figures/` - future figure identity and image helpers
@@ -75,16 +76,21 @@ smoke test.
 
 ## WiFi AP Smoke Test
 
-The firmware starts an open access point:
+The firmware starts an open access point with DHCP:
 
 * SSID: `Portal-Emulator`
 * device IP: `192.168.4.1`
+* DHCP pool: `192.168.4.100` through `192.168.4.199`
 * HTTP: `http://192.168.4.1/`
 * status JSON: `http://192.168.4.1/status`
 
-DHCP is not implemented yet. Configure the client manually:
+Phones and laptops should be able to use automatic IP configuration. If a
+client has cached an older failed connection attempt, forget the network and
+join it again.
 
-* IP address: `192.168.4.2`
+Manual fallback settings:
+
+* IP address: `192.168.4.100`
 * netmask: `255.255.255.0`
 * gateway/router: `192.168.4.1`
 * DNS: leave blank or use `192.168.4.1`

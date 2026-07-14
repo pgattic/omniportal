@@ -4,6 +4,7 @@
 extern crate alloc;
 
 mod config;
+mod dhcp;
 mod figures;
 mod state;
 mod storage;
@@ -83,6 +84,7 @@ fn main() -> ! {
     let _ = state::SUPPORTED_MODES;
     figures::initialize();
     storage::init();
+    dhcp::init();
     usb::init();
     web::init();
     wifi::init();
@@ -102,6 +104,7 @@ fn main() -> ! {
         spawner.spawn(usb::run()).ok();
         spawner.spawn(wifi::run_network(net_runner)).ok();
         spawner.spawn(wifi::run(wifi_controller)).ok();
+        spawner.spawn(dhcp::run(net_stack)).ok();
         spawner.spawn(web::run(net_stack)).ok();
         spawner.spawn(blink(led)).ok();
     });
