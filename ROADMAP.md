@@ -55,13 +55,13 @@ Definition of done: a set of identity records that can generate fresh zero-progr
 
 ## 3. Toolchain & Environment Setup
 
-- [ ] Install Rust via rustup.
-- [ ] Install the ESP Rust toolchain pieces required by the current `esp-hal`/`esp-wifi` stack for ESP32-S3.
-- [ ] Start from an ESP32-S3 Rust template that already boots on your board, initializes logging, and has the right linker/memory configuration.
-- [ ] Confirm the board can be flashed reliably over USB or UART.
+- [x] Install Rust via rustup.
+- [x] Install the ESP Rust toolchain pieces required by the current `esp-hal`/`esp-wifi` stack for ESP32-S3.
+- [x] Start from an ESP32-S3 Rust template that already boots on your board, initializes logging, and has the right linker/memory configuration.
+- [x] Confirm the board can be flashed reliably over USB or UART.
 - [ ] Confirm native USB device mode is available on the board's exposed USB connector/pins. Avoid boards where the only USB connector is wired solely through a USB-UART bridge.
-- [ ] Blink an LED or print a serial log message as the first smoke test.
-- [ ] Add the minimal async/runtime setup needed by the chosen HAL stack.
+- [x] Blink an LED or print a serial log message as the first smoke test.
+- [x] Add the minimal async/runtime setup needed by the chosen HAL stack.
 
 Definition of done: trivial firmware builds, flashes, and runs on the exact ESP32-S3-N16R8 board.
 

@@ -1,0 +1,22 @@
+[build]
+target = "xtensa-esp32s3-none-elf"
+
+[unstable]
+build-std = ["core"]
+
+[target.xtensa-esp32s3-none-elf]
+linker = "ldproxy"
+runner = "espflash flash --monitor"
+rustflags = [
+  "-C",
+  "link-arg=--ldproxy-linker",
+  "-C",
+  "link-arg=xtensa-esp32s3-elf-gcc",
+  "-C",
+  "link-arg=-Tlinkall.x",
+  "-C",
+  "link-arg=-nostartfiles",
+]
+
+[env]
+ESP_LOG = "info"

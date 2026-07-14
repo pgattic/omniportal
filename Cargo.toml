@@ -1,0 +1,20 @@
+[package]
+name = "omniportal"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = ["led-gpio-2"]
+led-gpio-2 = []
+led-gpio-48 = []
+
+[dependencies]
+embassy-executor = { version = "0.7", features = ["arch-spin", "executor-thread", "task-arena-size-1024"] }
+embassy-time = "0.4"
+esp-backtrace = { version = "0.16", features = ["esp32s3", "panic-handler", "println"] }
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32s3"] }
+esp-hal = { version = "=1.0.0-rc.0", features = ["esp32s3", "unstable"] }
+esp-hal-embassy = { version = "0.9.1", default-features = false, features = ["esp32s3"] }
+esp-println = { version = "0.14", features = ["esp32s3", "log-04"] }
+static_cell = "2"
