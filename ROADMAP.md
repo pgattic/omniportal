@@ -110,7 +110,7 @@ Definition of done: project compiles with empty/stub modules wired together; tas
 ### Phase A — Open WiFi AP + Web Server Bring-Up (no USB yet)
 
 - [x] Bring up ESP32-S3 WiFi in AP mode.
-- [x] Use an open network for simplest phone access, for example SSID `Portal-Emulator`, no password.
+- [x] Use an open network for simplest phone access, no password.
 - [x] Assign the device a predictable AP-side IP, for example `192.168.4.1`.
 - [x] Enable DHCP for clients if the networking stack supports it directly. If DHCP is awkward in the first pass, document the phone's required manual IP settings and treat real DHCP as a follow-up task.
 - [x] Stand up a minimal async HTTP server serving a single static "Hello" page.

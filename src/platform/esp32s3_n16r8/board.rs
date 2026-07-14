@@ -1,4 +1,4 @@
-pub const AP_SSID: &str = "Portal-Emulator";
+pub const AP_SSID: &str = "OmniPortal";
 pub const AP_IP_OCTETS: [u8; 4] = [192, 168, 4, 1];
 pub const AP_NETMASK_PREFIX: u8 = 24;
 pub const HTTP_PORT: u16 = 80;

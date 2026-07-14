@@ -58,7 +58,7 @@ storage scans a flash-backed append-only journal at boot.
 
 The firmware starts an open access point with DHCP:
 
-* SSID: `Portal-Emulator`
+* SSID: `OmniPortal`
 * device IP: `192.168.4.1`
 * DHCP pool: `192.168.4.100` through `192.168.4.199`
 * HTTP: `http://192.168.4.1/`
