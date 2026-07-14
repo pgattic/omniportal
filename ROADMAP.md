@@ -73,8 +73,15 @@ Definition of done: trivial firmware builds, flashes, and runs on the exact ESP3
 Recommended crate layout (single binary crate to start; split into internal modules, not separate crates, to keep it simple):
 
     src/
-      main.rs              - entry point, task spawning
-      wifi.rs              - ESP WiFi init, open AP setup, network stack bring-up
+      main.rs              - thin firmware entry point
+      platform/
+        mod.rs              - selected platform exports used by shared modules
+        esp32s3_n16r8/
+          mod.rs            - ESP32-S3 board entry point, task spawning, heap/timer/WiFi setup
+          board.rs          - AP SSID/IP, flash region, LED pin, and board constants
+          wifi.rs           - ESP WiFi init, open AP setup, network stack bring-up
+          storage_flash.rs  - ESP flash adapter used by storage
+          log.rs            - ESP logging export
       web/
         mod.rs             - HTTP server setup
         routes.rs           - route handlers (upload/download identity, generate instance, upload/download backup, clone instance, rename, select, toggle mode, status)
@@ -92,7 +99,7 @@ Recommended crate layout (single binary crate to start; split into internal modu
         records.rs           - stored identity/instance/backup metadata structures
         wear.rs              - deferred writes, journal/GC helpers
       state.rs               - shared app state (active figure, active mode)
-      config.rs              - AP SSID, static IP, build-time config values
+      config.rs              - temporary facade over platform board constants
 
 Definition of done: project compiles with empty/stub modules wired together; task skeleton runs.
 

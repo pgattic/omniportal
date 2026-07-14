@@ -61,14 +61,15 @@ espflash flash --monitor target/xtensa-esp32s3-none-elf/release/omniportal
 The firmware is currently a single binary crate with subsystem stubs wired into
 the entry point:
 
-* `wifi.rs` - ESP32-S3 AP bring-up
 * `dhcp.rs` - small DHCPv4 server for AP clients
 * `web/` - HTTP routes and embedded UI
 * `usb/` - future portal USB device modes
 * `figures/` - future figure identity and image helpers
 * `storage/` - flash-backed append-only catalog and blob records
+* `platform/esp32s3_n16r8/` - ESP32-S3 board entrypoint, WiFi, logging,
+  flash adapter, heap setup, and board constants
 * `state.rs` - shared mode/selection state
-* `config.rs` - build-time constants
+* `config.rs` - temporary facade over platform board constants
 
 The USB subsystem task is intentionally idle for now. WiFi/Web are active, and
 storage scans a flash-backed append-only journal at boot. The GPIO blinky

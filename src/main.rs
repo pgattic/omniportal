@@ -6,137 +6,15 @@ extern crate alloc;
 mod config;
 mod dhcp;
 mod figures;
+mod platform;
 mod state;
 mod storage;
 mod usb;
 mod web;
-mod wifi;
 
-use config::LED_GPIO;
-use core::mem::MaybeUninit;
-use embassy_executor::Executor;
-use embassy_net::{Ipv4Address, Ipv4Cidr, StackResources, StaticConfigV4};
-use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
-use esp_hal::gpio::{Output, OutputConfig};
-use esp_hal::rng::Rng;
-use esp_hal::{clock::CpuClock, gpio::Level, timer::timg::TimerGroup};
-use esp_println::println;
-use static_cell::StaticCell;
-
-#[unsafe(export_name = "esp_app_desc")]
-#[unsafe(link_section = ".rodata_desc")]
-#[used]
-static ESP_APP_DESC: esp_bootloader_esp_idf::EspAppDesc =
-    esp_bootloader_esp_idf::EspAppDesc::new_internal(
-        env!("CARGO_PKG_VERSION"),
-        env!("CARGO_PKG_NAME"),
-        esp_bootloader_esp_idf::BUILD_TIME,
-        esp_bootloader_esp_idf::BUILD_DATE,
-        esp_bootloader_esp_idf::ESP_IDF_COMPATIBLE_VERSION,
-        0,
-        199,
-        esp_bootloader_esp_idf::MMU_PAGE_SIZE,
-    );
 
 #[esp_hal::main]
 fn main() -> ! {
-    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let peripherals = esp_hal::init(config);
-
-    init_heap();
-
-    let timer_group = TimerGroup::new(peripherals.TIMG0);
-    esp_hal_embassy::init(timer_group.timer0);
-
-    let wifi_timer_group = TimerGroup::new(peripherals.TIMG1);
-    static ESP_WIFI_CONTROLLER: StaticCell<esp_wifi::EspWifiController<'static>> =
-        StaticCell::new();
-    let esp_wifi_controller = ESP_WIFI_CONTROLLER
-        .init(esp_wifi::init(wifi_timer_group.timer0, Rng::new(peripherals.RNG)).unwrap());
-    let (wifi_controller, wifi_interfaces) =
-        esp_wifi::wifi::new(esp_wifi_controller, peripherals.WIFI).unwrap();
-
-    let net_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
-        address: Ipv4Cidr::new(
-            Ipv4Address::new(
-                config::AP_IP_OCTETS[0],
-                config::AP_IP_OCTETS[1],
-                config::AP_IP_OCTETS[2],
-                config::AP_IP_OCTETS[3],
-            ),
-            config::AP_NETMASK_PREFIX,
-        ),
-        gateway: None,
-        dns_servers: Default::default(),
-    });
-    static NET_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
-    let (net_stack, net_runner) = embassy_net::new(
-        wifi_interfaces.ap,
-        net_config,
-        NET_RESOURCES.init(StackResources::new()),
-        0x4f4d_4e49,
-    );
-
-    println!("OmniPortal ESP32-S3 Embassy blinky starting");
-
-    let _app_state = state::AppState::new();
-    let _ = state::SUPPORTED_MODES;
-    figures::initialize();
-    storage::init();
-    dhcp::init();
-    usb::init();
-    web::init();
-    wifi::init();
-
-    println!("Blinking GPIO{LED_GPIO}");
-
-    static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-    let executor = EXECUTOR.init(Executor::new());
-    executor.run(|spawner| {
-        #[cfg(feature = "led-gpio-48")]
-        let led = Output::new(peripherals.GPIO48, Level::Low, OutputConfig::default());
-
-        #[cfg(all(feature = "led-gpio-2", not(feature = "led-gpio-48")))]
-        let led = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
-
-        spawner.spawn(storage::run()).ok();
-        spawner.spawn(usb::run()).ok();
-        spawner.spawn(wifi::run_network(net_runner)).ok();
-        spawner.spawn(wifi::run(wifi_controller)).ok();
-        spawner.spawn(dhcp::run(net_stack)).ok();
-        spawner.spawn(web::run(net_stack)).ok();
-        spawner.spawn(blink(led)).ok();
-    });
-}
-
-fn init_heap() {
-    const HEAP_SIZE: usize = 96 * 1024;
-    static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
-
-    unsafe {
-        #[allow(static_mut_refs)]
-        esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
-            HEAP.as_mut_ptr() as *mut u8,
-            HEAP_SIZE,
-            esp_alloc::MemoryCapability::Internal.into(),
-        ));
-    }
-}
-
-#[embassy_executor::task]
-async fn blink(mut led: Output<'static>) {
-    let mut high = false;
-
-    loop {
-        high = !high;
-
-        if high {
-            led.set_high();
-        } else {
-            led.set_low();
-        }
-
-        Timer::after(Duration::from_secs(5)).await;
-    }
+    platform::esp32s3_n16r8::run()
 }

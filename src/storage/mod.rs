@@ -4,6 +4,8 @@ use crate::config;
 use crate::figures::formats::ImageFormat;
 use crate::figures::init::initialize_skylanders_placeholder;
 use crate::figures::{FigureKind, GameLine};
+use crate::platform::println;
+use crate::platform::StorageFlash;
 use crate::storage::records::{
     BackupBlob, BlobId, CharacterIdentity, CharacterInstance, FixedText, RecordId, StoredBlob,
     MAX_BACKUPS, MAX_IDENTITIES, MAX_INSTANCES, MAX_RECORD_NAME_BYTES,
@@ -16,9 +18,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use critical_section::Mutex;
 use embassy_time::{Duration, Timer};
-use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
-use esp_println::println;
-use esp_storage::FlashStorage;
 
 pub mod records;
 pub mod wear;
@@ -39,7 +38,7 @@ static STORE: Mutex<RefCell<Option<Store>>> = Mutex::new(RefCell::new(None));
 
 pub fn init() {
     let _ = DEFAULT_COMMIT_DEBOUNCE_MS;
-    let mut flash = FlashStorage::new();
+    let mut flash = StorageFlash::new();
     let mut catalog = Catalog::new();
     let scan = scan_flash(&mut flash, &mut catalog);
     println!(
@@ -682,7 +681,7 @@ fn with_store_mut<R>(
 }
 
 struct Store {
-    flash: FlashStorage,
+    flash: StorageFlash,
     catalog: Catalog,
 }
 
@@ -961,7 +960,7 @@ fn delete_by_id<T: Copy, I: Eq>(
     }
 }
 
-fn scan_flash(flash: &mut FlashStorage, catalog: &mut Catalog) -> Result<(), StorageError> {
+fn scan_flash(flash: &mut StorageFlash, catalog: &mut Catalog) -> Result<(), StorageError> {
     let mut offset = 0;
     let mut word = [0; 4];
     while offset + JOURNAL_RECORD_HEADER_BYTES as u32 <= config::STORAGE_FLASH_BYTES {
@@ -1071,7 +1070,7 @@ fn apply_record(
 }
 
 fn append_blob(
-    flash: &mut FlashStorage,
+    flash: &mut StorageFlash,
     catalog: &mut Catalog,
     image: &[u8],
 ) -> Result<BlobId, StorageError> {
@@ -1124,7 +1123,7 @@ fn append_backup_record(store: &mut Store, backup: BackupBlob) -> Result<(), Sto
 }
 
 fn append_config_record(
-    flash: &mut FlashStorage,
+    flash: &mut StorageFlash,
     catalog: &mut Catalog,
     active_instance_id: Option<RecordId>,
     generation: u32,
@@ -1140,7 +1139,7 @@ fn append_config_record(
 }
 
 fn append_record(
-    flash: &mut FlashStorage,
+    flash: &mut StorageFlash,
     catalog: &mut Catalog,
     kind: u8,
     id: u32,

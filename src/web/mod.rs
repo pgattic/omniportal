@@ -1,8 +1,8 @@
+use crate::platform::println;
 use alloc::format;
 use alloc::string::String;
 use embassy_net::{tcp::TcpSocket, Stack};
 use embassy_time::{Duration, Timer};
-use esp_println::println;
 
 pub mod routes;
 pub mod ui_html;

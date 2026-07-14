@@ -1,8 +1,8 @@
 use crate::config;
+use crate::platform::println;
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, Ipv4Address, Stack};
 use embassy_time::{Duration, Timer};
-use esp_println::println;
 
 const SERVER_PORT: u16 = 67;
 const CLIENT_PORT: u16 = 68;
