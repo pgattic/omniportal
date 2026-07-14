@@ -7,6 +7,71 @@ pub enum GameLine {
     Infinity,
 }
 
+impl GameLine {
+    pub const fn as_u8(self) -> u8 {
+        match self {
+            Self::Skylanders => 1,
+            Self::Infinity => 2,
+        }
+    }
+
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::Skylanders),
+            2 => Some(Self::Infinity),
+            _ => None,
+        }
+    }
+
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::Skylanders => "skylanders",
+            Self::Infinity => "infinity",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FigureKind {
+    Character,
+    Vehicle,
+    Item,
+    Trap,
+    Unknown,
+}
+
+impl FigureKind {
+    pub const fn as_u8(self) -> u8 {
+        match self {
+            Self::Character => 1,
+            Self::Vehicle => 2,
+            Self::Item => 3,
+            Self::Trap => 4,
+            Self::Unknown => 255,
+        }
+    }
+
+    pub const fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Character,
+            2 => Self::Vehicle,
+            3 => Self::Item,
+            4 => Self::Trap,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::Character => "character",
+            Self::Vehicle => "vehicle",
+            Self::Item => "item",
+            Self::Trap => "trap",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FigureIdentity {
     pub game_line: GameLine,

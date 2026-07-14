@@ -114,18 +114,18 @@ Definition of done: phone connects to the ESP32-S3's own open WiFi network and l
 
 ### Phase B — Persistent Storage Bring-Up (no USB protocol yet)
 
-- [ ] Choose the storage layout for flash: reserved partition/region, append-only journal or small embedded filesystem, metadata records, binary blob records, and garbage collection strategy.
-- [ ] Define the data model:
+- [x] Choose the storage layout for flash: reserved partition/region, append-only journal or small embedded filesystem, metadata records, binary blob records, and garbage collection strategy.
+- [x] Define the data model:
   - Figure identity: game line, display name, character/model ID, variant ID if applicable, optional physical tag UID/NUID, type/slot category, source notes, checksum.
   - Figure instance: named playable image generated from an identity or uploaded directly, mutable binary data, parent identity ID if any, creation/update timestamps or monotonic counters if available, checksum.
   - Backup/import blob: optional raw dump file preserved for archival/export compatibility.
-- [ ] Add upload/download endpoints for identity records.
+- [x] Add upload/download endpoints for identity records.
 - [ ] Add upload endpoints for direct instance/backup binary files.
 - [ ] Add download endpoints for exact binary export of instances/backups.
 - [ ] Add list/delete/rename endpoints for identities, instances, and backups.
 - [ ] Add "create fresh instance from identity" support that runs the proper initializer and creates a user-named mutable instance with zero-progress/default-progress state.
 - [ ] Add "clone instance" support that copies an existing mutable image when the user wants another save slot from the same current state.
-- [ ] Add a small integrity check at boot: scan records, reject corrupt entries, expose storage status in `/status`.
+- [x] Add a small integrity check at boot: scan records, reject corrupt entries, expose storage status in `/status`.
 - [ ] Confirm uploads survive reboot and power loss during a non-active upload.
 
 Definition of done: phone can create/import an identity, generate a named fresh instance from it, download the instance, reboot, and see the same library again.

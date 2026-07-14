@@ -878,6 +878,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp-storage"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f276ad8a3bdc6b47cd92a3e91013f2e42dce9b3fc5023392063387a1ce2ed69a"
+dependencies = [
+ "critical-section",
+ "document-features",
+ "embedded-storage",
+ "esp-rom-sys",
+]
+
+[[package]]
 name = "esp-synopsys-usb-otg"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1272,15 +1284,18 @@ dependencies = [
 name = "omniportal"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embassy-executor",
  "embassy-net",
  "embassy-time 0.4.0",
+ "embedded-storage",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-hal-embassy",
  "esp-println",
+ "esp-storage",
  "esp-wifi",
  "static_cell",
 ]

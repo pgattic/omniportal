@@ -1,1 +1,3 @@
 pub const DEFAULT_COMMIT_DEBOUNCE_MS: u32 = 2_000;
+pub const JOURNAL_RECORD_MAGIC: u32 = 0x4f_4d_4e_49;
+pub const JOURNAL_RECORD_HEADER_BYTES: usize = 24;

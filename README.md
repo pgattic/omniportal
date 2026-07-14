@@ -63,16 +63,16 @@ the entry point:
 
 * `wifi.rs` - ESP32-S3 AP bring-up
 * `dhcp.rs` - small DHCPv4 server for AP clients
-* `web/` - future HTTP routes and embedded UI
+* `web/` - HTTP routes and embedded UI
 * `usb/` - future portal USB device modes
 * `figures/` - future figure identity and image helpers
-* `storage/` - future flash records and wear-management helpers
+* `storage/` - flash-backed append-only catalog and blob records
 * `state.rs` - shared mode/selection state
 * `config.rs` - build-time constants
 
-The storage and USB subsystem tasks are intentionally idle for now. WiFi/Web are
-active for the AP smoke test, and the GPIO blinky remains the hardware runtime
-smoke test.
+The USB subsystem task is intentionally idle for now. WiFi/Web are active, and
+storage scans a flash-backed append-only journal at boot. The GPIO blinky
+remains the hardware runtime smoke test.
 
 ## WiFi AP Smoke Test
 
@@ -97,6 +97,33 @@ Manual fallback settings:
 
 After connecting, the root page should show `Hello from ESP32-S3`, and
 `/status` should return hardcoded JSON.
+
+## Storage Smoke Test
+
+The firmware reserves the final 256 KiB of the 16 MiB flash chip for the
+OmniPortal append-only journal:
+
+* offset: `0x00fc0000`
+* size: `0x00040000`
+
+This is a Phase B bootstrap layout based on the current boot log's factory app
+partition ending at `0x00fb0000`. Before the firmware grows large, replace this
+with an explicit partition-table entry.
+
+Useful endpoints:
+
+* `GET /api/library` - list identities and instances
+* `GET /api/storage/format` - erase the OmniPortal storage region
+* `GET /api/identity/create?name=Trigger+Happy&character_id=21`
+* `GET /api/instance/create?identity_id=1&name=Preston%27s+Trigger+Happy`
+* `GET /api/instance/1.bin` - download the instance image
+* `GET /api/instance/rename?id=1&name=Jacob%27s+Trigger+Happy`
+* `GET /api/instance/delete?id=1`
+* `GET /api/identity/delete?id=1`
+
+Fresh Skylanders instances are currently placeholder 1 KiB images with an
+OmniPortal marker and the character/variant IDs embedded. They prove durable
+storage and exact download plumbing, but they are not yet valid game images.
 
 ## Native USB Check
 
