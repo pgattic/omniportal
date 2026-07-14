@@ -1,6 +1,15 @@
 #![no_std]
 #![no_main]
 
+mod config;
+mod figures;
+mod state;
+mod storage;
+mod usb;
+mod web;
+mod wifi;
+
+use config::LED_GPIO;
 use embassy_executor::Executor;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
@@ -8,15 +17,6 @@ use esp_hal::gpio::{Output, OutputConfig};
 use esp_hal::{clock::CpuClock, gpio::Level, timer::timg::TimerGroup};
 use esp_println::println;
 use static_cell::StaticCell;
-
-#[cfg(all(feature = "led-gpio-2", feature = "led-gpio-48"))]
-compile_error!("Select only one LED GPIO feature");
-
-#[cfg(feature = "led-gpio-48")]
-const LED_GPIO: u8 = 48;
-
-#[cfg(all(feature = "led-gpio-2", not(feature = "led-gpio-48")))]
-const LED_GPIO: u8 = 2;
 
 #[unsafe(export_name = "esp_app_desc")]
 #[unsafe(link_section = ".rodata_desc")]
@@ -43,6 +43,14 @@ fn main() -> ! {
 
     println!("OmniPortal ESP32-S3 Embassy blinky starting");
 
+    let _app_state = state::AppState::new();
+    let _ = state::SUPPORTED_MODES;
+    figures::initialize();
+    storage::init();
+    usb::init();
+    web::init();
+    wifi::init();
+
     println!("Blinking GPIO{LED_GPIO}");
 
     static EXECUTOR: StaticCell<Executor> = StaticCell::new();
@@ -54,6 +62,10 @@ fn main() -> ! {
         #[cfg(all(feature = "led-gpio-2", not(feature = "led-gpio-48")))]
         let led = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
 
+        spawner.spawn(storage::run()).ok();
+        spawner.spawn(usb::run()).ok();
+        spawner.spawn(web::run()).ok();
+        spawner.spawn(wifi::run()).ok();
         spawner.spawn(blink(led)).ok();
     });
 }

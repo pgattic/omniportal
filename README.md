@@ -56,6 +56,22 @@ cargo build --release --no-default-features --features led-gpio-48
 espflash flash --monitor target/xtensa-esp32s3-none-elf/release/omniportal
 ```
 
+## Firmware Structure
+
+The firmware is currently a single binary crate with subsystem stubs wired into
+the entry point:
+
+* `wifi.rs` - future ESP32-S3 AP/network bring-up
+* `web/` - future HTTP routes and embedded UI
+* `usb/` - future portal USB device modes
+* `figures/` - future figure identity and image helpers
+* `storage/` - future flash records and wear-management helpers
+* `state.rs` - shared mode/selection state
+* `config.rs` - build-time constants
+
+The stub subsystem tasks are intentionally idle for now; the GPIO blinky remains
+the runtime smoke test.
+
 ## Native USB Check
 
 This board has two USB-C connectors. One may be wired through a USB-UART bridge,

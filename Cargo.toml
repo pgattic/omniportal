@@ -10,7 +10,7 @@ led-gpio-2 = []
 led-gpio-48 = []
 
 [dependencies]
-embassy-executor = { version = "0.7", features = ["arch-spin", "executor-thread", "task-arena-size-1024"] }
+embassy-executor = { version = "0.7", features = ["arch-spin", "executor-thread", "task-arena-size-4096"] }
 embassy-time = "0.4"
 esp-backtrace = { version = "0.16", features = ["esp32s3", "panic-handler", "println"] }
 esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32s3"] }

@@ -1,0 +1,1 @@
+pub const DEFAULT_COMMIT_DEBOUNCE_MS: u32 = 2_000;
