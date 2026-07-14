@@ -1,12 +1,3 @@
-#[cfg(all(feature = "led-gpio-2", feature = "led-gpio-48"))]
-compile_error!("Select only one LED GPIO feature");
-
-#[cfg(feature = "led-gpio-48")]
-pub const LED_GPIO: u8 = 48;
-
-#[cfg(all(feature = "led-gpio-2", not(feature = "led-gpio-48")))]
-pub const LED_GPIO: u8 = 2;
-
 pub const AP_SSID: &str = "Portal-Emulator";
 pub const AP_IP_OCTETS: [u8; 4] = [192, 168, 4, 1];
 pub const AP_NETMASK_PREFIX: u8 = 24;

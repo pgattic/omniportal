@@ -4,11 +4,6 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
-[features]
-default = ["led-gpio-2"]
-led-gpio-2 = []
-led-gpio-48 = []
-
 [dependencies]
 embassy-executor = { version = "0.7", features = ["arch-spin", "executor-thread", "task-arena-size-32768"] }
 embassy-net = { version = "0.9.1", features = ["medium-ethernet", "proto-ipv4", "tcp", "udp", "log"] }

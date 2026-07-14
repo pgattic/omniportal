@@ -9,8 +9,6 @@ use crate::platform::println;
 use crate::{dhcp, figures, state, storage, usb, web};
 use embassy_executor::Executor;
 use embassy_net::{Ipv4Address, Ipv4Cidr, StackResources, StaticConfigV4};
-use embassy_time::{Duration, Timer};
-use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::rng::Rng;
 use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
 use static_cell::StaticCell;
@@ -79,24 +77,15 @@ pub fn run() -> ! {
     web::init();
     wifi::init();
 
-    println!("Blinking GPIO{}", board::LED_GPIO);
-
     static EXECUTOR: StaticCell<Executor> = StaticCell::new();
     let executor = EXECUTOR.init(Executor::new());
     executor.run(|spawner| {
-        #[cfg(feature = "led-gpio-48")]
-        let led = Output::new(peripherals.GPIO48, Level::Low, OutputConfig::default());
-
-        #[cfg(all(feature = "led-gpio-2", not(feature = "led-gpio-48")))]
-        let led = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());
-
         spawner.spawn(storage::run()).ok();
         spawner.spawn(usb::run()).ok();
         spawner.spawn(wifi::run_network(net_runner)).ok();
         spawner.spawn(wifi::run(wifi_controller)).ok();
         spawner.spawn(dhcp::run(net_stack)).ok();
         spawner.spawn(web::run(net_stack)).ok();
-        spawner.spawn(blink(led)).ok();
     });
 }
 
@@ -111,22 +100,5 @@ fn init_heap() {
             HEAP_SIZE,
             esp_alloc::MemoryCapability::Internal.into(),
         ));
-    }
-}
-
-#[embassy_executor::task]
-async fn blink(mut led: Output<'static>) {
-    let mut high = false;
-
-    loop {
-        high = !high;
-
-        if high {
-            led.set_high();
-        } else {
-            led.set_low();
-        }
-
-        Timer::after(Duration::from_secs(5)).await;
     }
 }
