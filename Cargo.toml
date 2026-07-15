@@ -21,3 +21,4 @@ esp-println = { version = "0.14", features = ["esp32s3", "log-04"] }
 esp-storage = { version = "0.7.0", features = ["esp32s3"] }
 esp-wifi = { version = "0.15.1", features = ["esp32s3", "wifi", "log-04"] }
 static_cell = "2"
+usb-device = "0.3.2"

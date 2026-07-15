@@ -1,5 +1,5 @@
 #[cfg(target_arch = "xtensa")]
-use embassy_time::{Duration, Timer};
+mod device;
 
 pub mod infinity;
 pub mod skylanders;
@@ -10,9 +10,4 @@ pub fn init() {
 }
 
 #[cfg(target_arch = "xtensa")]
-#[embassy_executor::task]
-pub async fn run() {
-    loop {
-        Timer::after(Duration::from_secs(60)).await;
-    }
-}
+pub use device::run;

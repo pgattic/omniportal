@@ -81,7 +81,13 @@ pub fn run() -> ! {
     let executor = EXECUTOR.init(Executor::new());
     executor.run(|spawner| {
         spawner.spawn(storage::run()).ok();
-        spawner.spawn(usb::run()).ok();
+        spawner
+            .spawn(usb::run(
+                peripherals.USB0,
+                peripherals.GPIO20,
+                peripherals.GPIO19,
+            ))
+            .ok();
         spawner.spawn(wifi::run_network(net_runner)).ok();
         spawner.spawn(wifi::run(wifi_controller)).ok();
         spawner.spawn(dhcp::run(net_stack)).ok();

@@ -140,11 +140,11 @@ Definition of done: phone can create/import an identity, generate a named fresh 
 
 ### Phase C — Minimal USB HID Device (no protocol logic yet)
 
-- [ ] Bring up native USB device mode on ESP32-S3.
-- [ ] Implement a bare-bones custom HID device: arbitrary VID/PID, minimal report descriptor, no real command handling.
-- [ ] Plug into a PC first, not the Wii, and confirm it enumerates (`lsusb` / Device Manager should show it).
-- [ ] Confirm you can send/receive a raw HID report from a simple PC-side test script (Python + `hidapi` is the easiest path here).
-- [ ] Keep WiFi AP running while USB is active to prove the two subsystems can coexist.
+- [x] Bring up native USB device mode on ESP32-S3.
+- [x] Implement a bare-bones custom HID device: arbitrary VID/PID, minimal report descriptor, no real command handling.
+- [x] Plug into a PC first, not the Wii, and confirm it enumerates (`lsusb` / Device Manager should show it).
+- [x] Confirm you can send/receive a raw HID report from a simple PC-side test script (Python + `hidapi` is the easiest path here).
+- [x] Keep WiFi AP running while USB is active to prove the two subsystems can coexist.
 
 Definition of done: PC recognizes the ESP32-S3 as a generic HID device while the web UI remains reachable over the ESP32-S3 AP.
 

@@ -18,6 +18,7 @@
           NIX_LD = pkgs.stdenv.cc.bintools.dynamicLinker;
           NIX_LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
             pkgs.stdenv.cc.cc
+            pkgs.libusb1
             pkgs.zlib
           ];
 
@@ -26,8 +27,12 @@
             espup
             ldproxy
             file
+            libusb1
             patchelf
             pkg-config
+            (python3.withPackages (python-pkgs: [
+              python-pkgs.pyusb
+            ]))
             rustup
             udev
           ];
@@ -37,6 +42,7 @@
             export CARGO_HOME="''${CARGO_HOME:-$PWD/.cargo-home}"
             export RUSTUP_TOOLCHAIN="''${RUSTUP_TOOLCHAIN:-esp}"
             export PATH="$CARGO_HOME/bin:$PATH"
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.libusb1 ]}:''${LD_LIBRARY_PATH:-}"
 
             if [ -f "$PWD/export-esp.sh" ]; then
               source "$PWD/export-esp.sh"
