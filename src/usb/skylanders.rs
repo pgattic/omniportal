@@ -18,6 +18,11 @@ pub const INTERRUPT_POLL_INTERVAL_MS: u8 = 1;
 
 pub const HID_SET_REPORT_REQUEST_TYPE: u8 = 0x21;
 pub const HID_SET_REPORT_REQUEST: u8 = 0x09;
+pub const HID_GET_REPORT_REQUEST: u8 = 0x01;
+pub const HID_GET_IDLE_REQUEST: u8 = 0x02;
+pub const HID_SET_IDLE_REQUEST: u8 = 0x0a;
+pub const HID_DESCRIPTOR_TYPE: u8 = 0x21;
+pub const HID_REPORT_DESCRIPTOR_TYPE: u8 = 0x22;
 
 pub const REPORT_BYTES: usize = 32;
 pub const MAX_PACKET_BYTES: usize = 64;
@@ -43,6 +48,72 @@ impl SlotStatus {
 }
 
 pub type Report = [u8; REPORT_BYTES];
+
+// Vendor-defined HID payload: 32-byte input, output, and feature reports.
+pub const HID_REPORT_DESCRIPTOR: &[u8] = &[
+    0x06,
+    0x00,
+    0xff, // Usage Page (Vendor Defined)
+    0x09,
+    0x01, // Usage (1)
+    0xa1,
+    0x01, // Collection (Application)
+    0x15,
+    0x00, // Logical Minimum (0)
+    0x26,
+    0xff,
+    0x00, // Logical Maximum (255)
+    0x75,
+    0x08, // Report Size (8)
+    0x95,
+    REPORT_BYTES as u8, // Report Count
+    0x09,
+    0x01, // Usage (1)
+    0x81,
+    0x02, // Input (Data, Variable, Absolute)
+    0x95,
+    REPORT_BYTES as u8, // Report Count
+    0x09,
+    0x02, // Usage (2)
+    0x91,
+    0x02, // Output (Data, Variable, Absolute)
+    0x95,
+    REPORT_BYTES as u8, // Report Count
+    0x09,
+    0x03, // Usage (3)
+    0xb1,
+    0x02, // Feature (Data, Variable, Absolute)
+    0xc0, // End Collection
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PortalState {
+    pub active: bool,
+    pub slots: [SlotStatus; MAX_FIGURES],
+    pub interrupt_counter: u8,
+}
+
+impl PortalState {
+    pub const fn new() -> Self {
+        Self {
+            active: false,
+            slots: [SlotStatus::Removed; MAX_FIGURES],
+            interrupt_counter: 0,
+        }
+    }
+
+    pub fn next_status_report(&mut self) -> Report {
+        let report = status_report(&self.slots, self.interrupt_counter, self.active);
+        self.interrupt_counter = self.interrupt_counter.wrapping_add(1);
+        report
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CommandResponse {
+    pub report: Report,
+    pub queue_report: bool,
+}
 
 pub fn figure_slot_id(slot: u8) -> Option<u8> {
     if (slot as usize) < MAX_FIGURES {
@@ -126,6 +197,79 @@ pub fn write_response(slot: u8, block: u8, ok: bool) -> Report {
     report
 }
 
+pub fn handle_command(state: &mut PortalState, command: &[u8]) -> Option<CommandResponse> {
+    let op = *command.first()?;
+    match op {
+        b'A' => {
+            state.active = command.get(1).copied().unwrap_or(0) != 0;
+            Some(CommandResponse {
+                report: activate_response(state.active),
+                queue_report: true,
+            })
+        }
+        b'R' => Some(CommandResponse {
+            report: ready_response(),
+            queue_report: true,
+        }),
+        b'S' => Some(CommandResponse {
+            report: state.next_status_report(),
+            queue_report: true,
+        }),
+        b'Q' => {
+            let slot = command_slot(command.get(1).copied().unwrap_or(0xff));
+            let block = command.get(2).copied().unwrap_or(0);
+            Some(CommandResponse {
+                report: query_error_response(block).map_slot(slot),
+                queue_report: true,
+            })
+        }
+        b'W' => {
+            let slot = command_slot(command.get(1).copied().unwrap_or(0xff));
+            let block = command.get(2).copied().unwrap_or(0);
+            Some(CommandResponse {
+                report: write_response(slot.unwrap_or(0xff), block, false),
+                queue_report: true,
+            })
+        }
+        b'M' => Some(CommandResponse {
+            report: audio_firmware_response(0x00, 0x19),
+            queue_report: true,
+        }),
+        b'C' | b'J' | b'L' | b'V' | b'Z' => Some(CommandResponse {
+            report: ack_response(op),
+            queue_report: op == b'V' || op == b'Z',
+        }),
+        _ => None,
+    }
+}
+
+fn command_slot(slot_id: u8) -> Option<u8> {
+    if (FIRST_FIGURE_SLOT_ID..FIRST_FIGURE_SLOT_ID + MAX_FIGURES as u8).contains(&slot_id) {
+        Some(slot_id & 0x0f)
+    } else {
+        None
+    }
+}
+
+fn ack_response(op: u8) -> Report {
+    let mut report = [0; REPORT_BYTES];
+    report[0] = op;
+    report
+}
+
+trait QueryErrorSlot {
+    fn map_slot(self, slot: Option<u8>) -> Self;
+}
+
+impl QueryErrorSlot for Report {
+    fn map_slot(mut self, slot: Option<u8>) -> Self {
+        if let Some(slot) = slot {
+            self[1] = figure_slot_id(slot).unwrap_or(0x01);
+        }
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +315,42 @@ mod tests {
         assert_eq!(report[1], 0x13);
         assert_eq!(report[2], 12);
         assert_eq!(&report[3..19], &data);
+    }
+
+    #[test]
+    fn command_handler_updates_activation_state() {
+        let mut state = PortalState::new();
+
+        let response = handle_command(&mut state, &[b'A', 1]).unwrap();
+
+        assert!(state.active);
+        assert!(response.queue_report);
+        assert_eq!(&response.report[..4], &[b'A', 0x01, 0xff, 0x77]);
+    }
+
+    #[test]
+    fn command_handler_returns_status_reports() {
+        let mut state = PortalState::new();
+        state.slots[0] = SlotStatus::Ready;
+
+        let first = handle_command(&mut state, &[b'S']).unwrap().report;
+        let second = handle_command(&mut state, &[b'S']).unwrap().report;
+
+        assert_eq!(first[0], b'S');
+        assert_eq!(&first[1..5], &0x01u32.to_le_bytes());
+        assert_eq!(first[5], 0);
+        assert_eq!(second[5], 1);
+    }
+
+    #[test]
+    fn command_handler_accepts_convenience_commands() {
+        let mut state = PortalState::new();
+
+        assert_eq!(
+            &handle_command(&mut state, &[b'M']).unwrap().report[..4],
+            &[b'M', 0x00, 0x00, 0x19]
+        );
+        assert!(!handle_command(&mut state, &[b'C']).unwrap().queue_report);
+        assert_eq!(handle_command(&mut state, &[b'V']).unwrap().report[0], b'V');
     }
 }

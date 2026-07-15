@@ -170,5 +170,20 @@ Useful signs:
 * `10c4:ea60` / `CP210x`, `1a86:55d4` / `CH343`, or similar means that connector
   is a USB-UART bridge, not native USB device mode.
 
-If the native connector appears as an Espressif USB device, then the board has
-the wiring needed for later HID-device firmware.
+The firmware now enumerates as a Skylanders Portal of Power-compatible HID
+device on the native USB connector:
+
+* VID/PID: `1430:0150`
+* product string: `Portal of Power`
+* interface: vendor-defined HID with 64-byte interrupt IN/OUT endpoints
+
+After flashing, plug the board's native USB connector into the host and run:
+
+```sh
+sudo python scripts/probe-skylanders-portal.py
+```
+
+The probe verifies that the device enumerates with the Skylanders VID/PID, that
+the interrupt IN endpoint is present, that a HID `SET_REPORT` activate command
+queues an `A 01 ff 77` response, and that `GET_REPORT` returns an `S` status
+report.
