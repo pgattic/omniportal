@@ -4,7 +4,7 @@ use crate::figures::{FigureKind, GameLine};
 pub const MAX_RECORD_NAME_BYTES: usize = 64;
 pub const MAX_SOURCE_NOTES_BYTES: usize = 96;
 pub const MAX_IDENTITIES: usize = 32;
-pub const MAX_INSTANCES: usize = 64;
+pub const MAX_ENTITIES: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RecordId(pub u32);
@@ -66,12 +66,47 @@ pub struct CharacterIdentity {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct CharacterInstance {
+pub enum EntityDataMode {
+    StaticGenerated,
+    MutableImage,
+}
+
+impl EntityDataMode {
+    pub const fn as_u8(self) -> u8 {
+        match self {
+            Self::StaticGenerated => 1,
+            Self::MutableImage => 2,
+        }
+    }
+
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::StaticGenerated),
+            2 => Some(Self::MutableImage),
+            _ => None,
+        }
+    }
+
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::StaticGenerated => "static-generated",
+            Self::MutableImage => "mutable-image",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Entity {
     pub id: RecordId,
     pub name: FixedText<MAX_RECORD_NAME_BYTES>,
     pub parent_identity_id: Option<RecordId>,
+    pub catalog_index: Option<u16>,
     pub game_line: GameLine,
-    pub blob_id: BlobId,
+    pub kind: FigureKind,
+    pub data_mode: EntityDataMode,
+    pub character_id: u32,
+    pub variant_id: Option<u32>,
+    pub blob_id: Option<BlobId>,
     pub image_format: ImageFormat,
     pub image_len: u32,
     pub image_crc32: u32,

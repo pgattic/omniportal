@@ -94,7 +94,7 @@ pub struct FigureIdentity {
 pub fn initialize() {
     let _ = catalog::SKYLANDERS_CATALOG.len();
     let _ = formats::MAX_FIGURE_IMAGE_BYTES;
-    let _ = init::DEFAULT_INSTANCE_NAME;
+    let _ = init::DEFAULT_ENTITY_NAME;
     let _ = FigureIdentity {
         game_line: GameLine::Skylanders,
         model_id: 0,

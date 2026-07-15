@@ -1,4 +1,4 @@
-pub const DEFAULT_INSTANCE_NAME: &str = "Fresh Instance";
+pub const DEFAULT_ENTITY_NAME: &str = "Fresh Entity";
 
 use crate::figures::formats::SKYLANDERS_IMAGE_BYTES;
 

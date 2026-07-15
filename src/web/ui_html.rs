@@ -40,8 +40,8 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 </section>
 
 <section>
-<h2>Create Instance</h2>
-<form id="instanceForm">
+<h2>Add to Collection</h2>
+<form id="entityForm">
 <div class="row">
 <label>Type<select id="catalogKind">
 <option value="">All types</option>
@@ -56,24 +56,24 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <label>Search<input id="catalogSearch" placeholder="Filter catalog"></label>
 </div>
 <label>Figure<select name="catalog_index" id="catalogSelect"></select></label>
-<label>Instance Name<input name="name" required placeholder="Save slot name"></label>
-<button class="primary" type="submit">Create Instance</button>
+<label>Entity Name<input name="name" required placeholder="Name"></label>
+<button class="primary" type="submit">Add Entity</button>
 <div class="meta" id="catalogCount"></div>
 </form>
 </section>
 
 <section>
 <h2>Upload</h2>
-<form id="uploadInstanceForm">
-<label>Instance Name<input name="name" required placeholder="Imported instance name"></label>
-<label>Instance Binary<input name="file" type="file" required></label>
-<button type="submit">Upload Instance</button>
+<form id="uploadEntityForm">
+<label>Entity Name<input name="name" required placeholder="Imported entity name"></label>
+<label>Entity Binary<input name="file" type="file" required></label>
+<button type="submit">Upload Entity</button>
 </form>
 </section>
 
 <section>
-<h2>Instances</h2>
-<div id="instances" class="list"></div>
+<h2>Collection</h2>
+<div id="entities" class="list"></div>
 </section>
 
 <section>
@@ -83,7 +83,7 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 </main>
 
 <script>
-let library = {identities:[], instances:[], active_instance_id:null};
+let library = {identities:[], entities:[], active_entity_id:null};
 let catalog = [];
 let catalogTotal = 0;
 let catalogTimer = 0;
@@ -115,8 +115,8 @@ function renderStatus(status) {
   const storage = status.storage || {};
   $("status").innerHTML =
     `<div>Mode: ${status.mode || "unknown"}</div>` +
-    `<div>Active instance: ${status.active_instance ?? "none"}</div>` +
-    `<div>Records: ${storage.instances || 0} instances</div>` +
+    `<div>Active entity: ${status.active_entity ?? "none"}</div>` +
+    `<div>Records: ${storage.entities || 0} entities</div>` +
     `<div>Storage: ${storage.used_bytes || 0} / ${storage.capacity_bytes || 0} bytes</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
 }
@@ -143,26 +143,31 @@ function renderCatalog() {
 }
 
 function renderLibrary() {
-  renderInstances();
+  renderEntities();
 }
 
 function itemShell(title, meta, actions) {
   return `<div class="item"><strong>${title}</strong><div class="meta">${meta}</div><div class="actions">${actions}</div></div>`;
 }
 
-function renderInstances() {
-  $("instances").innerHTML = library.instances.map(item => {
-    const active = item.id === library.active_instance_id ? " active" : "";
+function renderEntities() {
+  const entities = [...(library.entities || [])].sort((left, right) => left.name.localeCompare(right.name));
+  $("entities").innerHTML = entities.map(item => {
+    const active = item.id === library.active_entity_id ? " active" : "";
+    const download = `<a href="/api/entity/${item.id}.bin">Download</a>`;
+    const clone = item.data_mode === "mutable-image"
+      ? `<button onclick="cloneEntity(${item.id})">Clone</button>`
+      : `<button onclick="cloneEntity(${item.id})">Create mutable copy</button>`;
     return itemShell(
       `#${item.id} ${item.name}${active}`,
-      `${item.game}, ${item.image_len} bytes, crc32 ${item.crc32}`,
-      `<button onclick="selectInstance(${item.id})">Select</button>` +
-      `<button onclick="cloneInstance(${item.id})">Clone</button>` +
-      `<button onclick="renameRecord('instance',${item.id})">Rename</button>` +
-      `<button onclick="deleteRecord('instance',${item.id})">Delete</button>` +
-      `<a href="/api/instance/${item.id}.bin">Download</a>`
+      `${item.kind}, ${item.data_mode}, ${item.image_len} bytes, crc32 ${item.crc32}`,
+      `<button onclick="selectEntity(${item.id})">Select</button>` +
+      clone +
+      `<button onclick="renameRecord('entity',${item.id})">Rename</button>` +
+      `<button onclick="deleteRecord('entity',${item.id})">Delete</button>` +
+      download
     );
-  }).join("") || "<div class='meta'>No instances.</div>";
+  }).join("") || "<div class='meta'>No collection entities.</div>";
 }
 
 $("catalogKind").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
@@ -171,23 +176,23 @@ $("catalogSearch").addEventListener("input", () => {
   catalogTimer = setTimeout(() => loadCatalog().catch(error => say(error.message)), 250);
 });
 
-$("instanceForm").addEventListener("submit", async event => {
+$("entityForm").addEventListener("submit", async event => {
   event.preventDefault();
   try {
-    say(await api("/api/instance/create-from-catalog", {method:"POST", body: qs(event.target)}));
+    say(await api("/api/entity/create-from-catalog", {method:"POST", body: qs(event.target)}));
     event.target.reset();
     await loadCatalog();
     await refreshAll();
   } catch (error) { say(error.message); }
 });
 
-$("uploadInstanceForm").addEventListener("submit", async event => {
+$("uploadEntityForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.target;
   const file = form.elements.file.files[0];
   const query = `name=${enc(form.elements.name.value)}`;
   try {
-    say(await api(`/api/instance/upload?${query}`, {method:"POST", body: await file.arrayBuffer()}));
+    say(await api(`/api/entity/upload?${query}`, {method:"POST", body: await file.arrayBuffer()}));
     form.reset();
     await refreshAll();
   } catch (error) { say(error.message); }
@@ -199,21 +204,21 @@ async function post(path, params = "") {
   await refreshAll();
 }
 
-async function selectInstance(id) {
-  await post("/api/instance/select", `id=${id}`);
+async function selectEntity(id) {
+  await post("/api/entity/select", `id=${id}`);
 }
 
 async function clearActive() {
-  await post("/api/instance/clear-active");
+  await post("/api/entity/clear-active");
 }
 
 async function compactStorage() {
   if (confirm("Compact storage now?")) await post("/api/storage/compact");
 }
 
-async function cloneInstance(id) {
+async function cloneEntity(id) {
   const name = prompt("Clone name");
-  if (name) await post("/api/instance/clone", `source_id=${id}&name=${enc(name)}`);
+  if (name) await post("/api/entity/clone", `source_id=${id}&name=${enc(name)}`);
 }
 
 async function renameRecord(kind, id) {

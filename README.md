@@ -100,38 +100,41 @@ with an explicit partition-table entry.
 
 Useful read endpoints:
 
-* `GET /api/library` - list identities and instances
+* `GET /api/library` - list identities and collection entities
 * `GET /api/catalog` - list built-in Skylanders catalog entries
 * `GET /api/identity/1.json` - download an identity sidecar
-* `GET /api/instance/1.bin` - download an instance image
+* `GET /api/entity/1.bin` - download an entity image
 
 Useful mutation endpoints:
 
 ```sh
 curl -X POST 'http://192.168.4.1/api/storage/format'
-curl -X POST -d 'catalog_index=0&name=Save+Slot+1' 'http://192.168.4.1/api/instance/create-from-catalog'
-curl -X POST -d 'source_id=1&name=Jacob%27s+Trigger+Happy' 'http://192.168.4.1/api/instance/clone'
-curl -X POST -d 'id=1' 'http://192.168.4.1/api/instance/select'
-curl -X POST -d 'id=1&name=Renamed+Trigger+Happy' 'http://192.168.4.1/api/instance/rename'
-curl -X POST 'http://192.168.4.1/api/instance/clear-active'
+curl -X POST -d 'catalog_index=0&name=Trigger+Happy' 'http://192.168.4.1/api/entity/create-from-catalog'
+curl -X POST -d 'source_id=1&name=Second+Save+Slot' 'http://192.168.4.1/api/entity/clone'
+curl -X POST -d 'id=1' 'http://192.168.4.1/api/entity/select'
+curl -X POST -d 'id=1&name=Renamed+Trigger+Happy' 'http://192.168.4.1/api/entity/rename'
+curl -X POST 'http://192.168.4.1/api/entity/clear-active'
 curl -X POST 'http://192.168.4.1/api/storage/compact'
 ```
 
 Raw upload endpoints take query-string metadata and a binary request body:
 
 ```sh
-curl -X POST --data-binary @figure.bin 'http://192.168.4.1/api/instance/upload?name=Imported+Figure'
+curl -X POST --data-binary @figure.bin 'http://192.168.4.1/api/entity/upload?name=Imported+Figure'
 ```
 
 Delete endpoints use POST as well:
 
 ```sh
-curl -X POST -d 'id=1' 'http://192.168.4.1/api/instance/delete'
+curl -X POST -d 'id=1' 'http://192.168.4.1/api/entity/delete'
 ```
 
-Fresh Skylanders instances are currently placeholder 1 KiB images with an
-OmniPortal marker and the character/variant IDs embedded. They prove durable
-storage and exact download plumbing, but they are not yet valid game images.
+Collection entities are created from the built-in Skylanders catalog. Characters,
+traps, creation crystals, vehicles, and trophies get mutable 1 KiB placeholder
+images for now. Items and level pieces are stored as static-generated collection
+entries and synthesize their placeholder image only when downloaded or cloned.
+The placeholder images prove durable storage and exact download plumbing, but
+they are not yet valid game images.
 
 The built-in Skylanders catalog is stored as typed Rust constants in
 `src/figures/catalog.rs`. The character IDs, variant IDs, names, and categories

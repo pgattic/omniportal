@@ -117,18 +117,17 @@ LED/audio-related commands can be accepted without affecting MVP behavior:
 * `M`: audio firmware version, Dolphin uses `M, requested, 0x00, 0x19`
 * `V`: echo-style acknowledgement
 
-## Active Instance Mapping
+## Active Entity Mapping
 
 For the first real Skylanders implementation:
 
-* The selected storage instance maps to portal slot 0, exposed as slot ID
-  `0x10`.
-* Selecting an instance should queue slot status transitions `ADDED`, then
+* The selected storage entity maps to portal slot 0, exposed as slot ID `0x10`.
+* Selecting an entity should queue slot status transitions `ADDED`, then
   `READY`.
-* Clearing or changing the active instance should queue `REMOVING`, then
+* Clearing or changing the active entity should queue `REMOVING`, then
   `REMOVED` for the old slot.
-* Reads use the selected instance's 1024-byte image as 64 blocks of 16 bytes.
-* Writes mutate an in-RAM copy, mark the instance dirty, and are committed to
+* Reads use the selected entity's 1024-byte image as 64 blocks of 16 bytes.
+* Writes mutate an in-RAM copy, mark the entity dirty, and are committed to
   flash on debounce, removal, mode change, and orderly shutdown paths.
 
 ## Open Questions

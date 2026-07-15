@@ -65,8 +65,8 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         .await;
     } else if method == "GET" && path == routes::STATUS_PATH {
         let body = format!(
-            "{{\"mode\":\"skylanders\",\"active_instance\":{},\"storage\":{}}}\n",
-            crate::storage::active_instance_json(),
+            "{{\"mode\":\"skylanders\",\"active_entity\":{},\"storage\":{}}}\n",
+            crate::storage::active_entity_json(),
             crate::storage::status_json()
         );
         write_text(socket, "200 OK", "application/json", &body).await;
@@ -86,28 +86,28 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
             crate::storage::create_identity_from_params(params(query, body).as_str()),
         )
         .await;
-    } else if method == "POST" && path == "/api/instance/create" {
+    } else if method == "POST" && path == "/api/entity/create" {
         write_storage_result(
             socket,
-            crate::storage::create_instance_from_params(params(query, body).as_str()),
+            crate::storage::create_entity_from_params(params(query, body).as_str()),
         )
         .await;
-    } else if method == "POST" && path == "/api/instance/create-from-catalog" {
+    } else if method == "POST" && path == "/api/entity/create-from-catalog" {
         write_storage_result(
             socket,
-            crate::storage::create_instance_from_catalog_params(params(query, body).as_str()),
+            crate::storage::create_entity_from_catalog_params(params(query, body).as_str()),
         )
         .await;
-    } else if method == "POST" && path == "/api/instance/upload" {
+    } else if method == "POST" && path == "/api/entity/upload" {
         write_storage_result(
             socket,
-            crate::storage::upload_instance_from_params(query, body),
+            crate::storage::upload_entity_from_params(query, body),
         )
         .await;
-    } else if method == "POST" && path == "/api/instance/clone" {
+    } else if method == "POST" && path == "/api/entity/clone" {
         write_storage_result(
             socket,
-            crate::storage::clone_instance_from_params(params(query, body).as_str()),
+            crate::storage::clone_entity_from_params(params(query, body).as_str()),
         )
         .await;
     } else if method == "POST" && path == "/api/identity/delete" {
@@ -122,26 +122,26 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
             crate::storage::rename_identity_from_query(params(query, body).as_str()),
         )
         .await;
-    } else if method == "POST" && path == "/api/instance/delete" {
+    } else if method == "POST" && path == "/api/entity/delete" {
         write_storage_result(
             socket,
-            crate::storage::delete_instance_from_query(params(query, body).as_str()),
+            crate::storage::delete_entity_from_query(params(query, body).as_str()),
         )
         .await;
-    } else if method == "POST" && path == "/api/instance/rename" {
+    } else if method == "POST" && path == "/api/entity/rename" {
         write_storage_result(
             socket,
-            crate::storage::rename_instance_from_query(params(query, body).as_str()),
+            crate::storage::rename_entity_from_query(params(query, body).as_str()),
         )
         .await;
-    } else if method == "POST" && path == "/api/instance/select" {
+    } else if method == "POST" && path == "/api/entity/select" {
         write_storage_result(
             socket,
-            crate::storage::select_instance_from_params(params(query, body).as_str()),
+            crate::storage::select_entity_from_params(params(query, body).as_str()),
         )
         .await;
-    } else if method == "POST" && path == "/api/instance/clear-active" {
-        write_storage_result(socket, crate::storage::clear_active_instance()).await;
+    } else if method == "POST" && path == "/api/entity/clear-active" {
+        write_storage_result(socket, crate::storage::clear_active_entity()).await;
     } else if method == "POST" && path == "/api/storage/format" {
         write_storage_result(socket, crate::storage::format_storage()).await;
     } else if method == "POST" && path == "/api/storage/compact" {
@@ -157,11 +157,11 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         )
         .await;
     } else if let Some(id) = path
-        .strip_prefix("/api/instance/")
+        .strip_prefix("/api/entity/")
         .and_then(|tail| tail.strip_suffix(".bin"))
         .and_then(|raw| raw.parse::<u32>().ok())
     {
-        match crate::storage::read_instance_blob(crate::storage::records::RecordId(id)) {
+        match crate::storage::read_entity_blob(crate::storage::records::RecordId(id)) {
             Ok(data) => write_binary(socket, "200 OK", "application/octet-stream", &data).await,
             Err(error) => {
                 write_text(socket, error.status_code(), "text/plain", error.message()).await
