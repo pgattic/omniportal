@@ -54,7 +54,7 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     let body = request_body(request).unwrap_or(&[]);
 
     if method == "GET" && path == "/" {
-        write_all(socket, ui_html::INDEX_RESPONSE).await;
+        write_text(socket, "200 OK", "text/html", ui_html::INDEX_HTML).await;
     } else if method == "GET" && path == routes::STATUS_PATH {
         let body = format!(
             "{{\"mode\":\"skylanders\",\"active_instance\":{},\"storage\":{}}}\n",
