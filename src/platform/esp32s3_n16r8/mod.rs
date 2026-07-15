@@ -58,7 +58,7 @@ pub fn run() -> ! {
         gateway: None,
         dns_servers: Default::default(),
     });
-    static NET_RESOURCES: StaticCell<StackResources<3>> = StaticCell::new();
+    static NET_RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
     let (net_stack, net_runner) = embassy_net::new(
         wifi_interfaces.ap,
         net_config,
@@ -91,7 +91,9 @@ pub fn run() -> ! {
         spawner.spawn(wifi::run_network(net_runner)).ok();
         spawner.spawn(wifi::run(wifi_controller)).ok();
         spawner.spawn(dhcp::run(net_stack)).ok();
-        spawner.spawn(web::run(net_stack)).ok();
+        for _ in 0..web::HTTP_WORKERS {
+            spawner.spawn(web::run(net_stack)).ok();
+        }
     });
 }
 

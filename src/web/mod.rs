@@ -11,6 +11,8 @@ use embassy_time::{Duration, Timer};
 pub mod routes;
 pub mod ui_html;
 
+pub const HTTP_WORKERS: usize = 4;
+
 pub fn init() {
     let _ = routes::STATUS_PATH;
     let _ = (routes::Route::Index, routes::Route::Status);
@@ -19,13 +21,13 @@ pub fn init() {
 }
 
 #[cfg(target_arch = "xtensa")]
-#[embassy_executor::task]
+#[embassy_executor::task(pool_size = 4)]
 pub async fn run(stack: Stack<'static>) {
     stack.wait_config_up().await;
     println!("HTTP server ready");
 
     loop {
-        let mut rx_buffer = [0; 4096];
+        let mut rx_buffer = [0; 2048];
         let mut tx_buffer = [0; 2048];
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
 
@@ -55,6 +57,12 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
 
     if method == "GET" && path == "/" {
         write_text(socket, "200 OK", "text/html", ui_html::INDEX_HTML).await;
+    } else if method == "GET" && path == "/favicon.ico" {
+        write_all(
+            socket,
+            b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+        )
+        .await;
     } else if method == "GET" && path == routes::STATUS_PATH {
         let body = format!(
             "{{\"mode\":\"skylanders\",\"active_instance\":{},\"storage\":{}}}\n",
@@ -71,7 +79,7 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         )
         .await;
     } else if method == "GET" && path == "/api/catalog" {
-        write_catalog(socket).await;
+        write_catalog(socket, query).await;
     } else if method == "POST" && path == "/api/identity/create" {
         write_storage_result(
             socket,
@@ -204,21 +212,50 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
 }
 
 #[cfg(target_arch = "xtensa")]
-async fn write_catalog(socket: &mut TcpSocket<'_>) {
-    write_all(
-        socket,
-        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"skylanders\":[",
-    )
-    .await;
+async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
+    const DEFAULT_LIMIT: usize = 80;
+    const MAX_LIMIT: usize = 100;
 
-    for (index, entry) in crate::figures::catalog::SKYLANDERS_CATALOG
-        .iter()
-        .enumerate()
-    {
-        if index > 0 {
-            write_all(socket, b",").await;
+    let kind = query_param(query, "kind");
+    let search = query_param(query, "q").unwrap_or_default();
+    let offset = query_param(query, "offset")
+        .and_then(|value| parse_usize(value.as_str()))
+        .unwrap_or(0);
+    let limit = query_param(query, "limit")
+        .and_then(|value| parse_usize(value.as_str()))
+        .unwrap_or(DEFAULT_LIMIT)
+        .min(MAX_LIMIT);
+
+    let mut total = 0usize;
+
+    for entry in crate::figures::catalog::SKYLANDERS_CATALOG {
+        if catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
+            total += 1;
         }
-        let body = format!(
+    }
+
+    let mut body = format!(
+        "{{\"offset\":{},\"limit\":{},\"total\":{},\"skylanders\":[",
+        offset, limit, total
+    );
+    let mut emitted = 0usize;
+    let mut seen = 0usize;
+    for entry in crate::figures::catalog::SKYLANDERS_CATALOG {
+        if !catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
+            continue;
+        }
+        if seen < offset {
+            seen += 1;
+            continue;
+        }
+        if emitted >= limit {
+            break;
+        }
+        if emitted > 0 {
+            body.push(',');
+        }
+        emitted += 1;
+        body.push_str(&format!(
             "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"character_id\":{},\"variant_id\":{}}}",
             entry.index,
             entry.game_line.wire_name(),
@@ -227,11 +264,107 @@ async fn write_catalog(socket: &mut TcpSocket<'_>) {
             entry.name,
             entry.character_id,
             entry.variant_id
-        );
-        write_all(socket, body.as_bytes()).await;
+        ));
     }
 
-    write_all(socket, b"]}\n").await;
+    body.push_str("]}\n");
+    write_text(socket, "200 OK", "application/json", body.as_str()).await;
+}
+
+#[cfg(target_arch = "xtensa")]
+fn catalog_entry_matches(
+    entry: &crate::figures::catalog::FigureCatalogEntry,
+    kind: Option<&str>,
+    search: &str,
+) -> bool {
+    if let Some(kind) = kind {
+        if !kind.is_empty() && kind != entry.kind.wire_name() {
+            return false;
+        }
+    }
+    if search.is_empty() {
+        return true;
+    }
+
+    contains_ascii_case_insensitive(entry.name, search)
+        || contains_ascii_case_insensitive(entry.series, search)
+        || format!("{}", entry.character_id).contains(search)
+}
+
+#[cfg(target_arch = "xtensa")]
+fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
+    let haystack = haystack.as_bytes();
+    let needle = needle.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+
+    haystack.windows(needle.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle.iter())
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
+    })
+}
+
+#[cfg(target_arch = "xtensa")]
+fn query_param(query: &str, name: &str) -> Option<String> {
+    for pair in query.split('&') {
+        if let Some((key, value)) = pair.split_once('=') {
+            if key == name {
+                return Some(percent_decode(value));
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_arch = "xtensa")]
+fn parse_usize(value: &str) -> Option<usize> {
+    value.parse().ok()
+}
+
+#[cfg(target_arch = "xtensa")]
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = String::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                out.push(' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                if let (Some(high), Some(low)) =
+                    (hex_nibble(bytes[index + 1]), hex_nibble(bytes[index + 2]))
+                {
+                    out.push((high << 4 | low) as char);
+                    index += 3;
+                } else {
+                    index += 1;
+                }
+            }
+            byte => {
+                out.push(byte as char);
+                index += 1;
+            }
+        }
+    }
+    out
+}
+
+#[cfg(target_arch = "xtensa")]
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[cfg(target_arch = "xtensa")]

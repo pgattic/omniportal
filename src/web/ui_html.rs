@@ -96,6 +96,8 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <script>
 let library = {identities:[], instances:[], backups:[], active_instance_id:null};
 let catalog = [];
+let catalogTotal = 0;
+let catalogTimer = 0;
 
 const $ = id => document.getElementById(id);
 const enc = value => encodeURIComponent(value == null ? "" : value);
@@ -115,12 +117,8 @@ function say(value) {
 async function refreshAll() {
   const status = await api("/status");
   library = await api("/api/library");
-  if (catalog.length === 0) {
-    const loaded = await api("/api/catalog");
-    catalog = loaded.skylanders || [];
-  }
+  await loadCatalog();
   renderStatus(status);
-  renderCatalog();
   renderLibrary();
 }
 
@@ -134,25 +132,25 @@ function renderStatus(status) {
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
 }
 
-function renderCatalog() {
+async function loadCatalog() {
   const kind = $("catalogKind").value;
-  const search = $("catalogSearch").value.trim().toLowerCase();
-  const filtered = catalog.filter(item =>
-    (!kind || item.kind === kind) &&
-    (!search ||
-      item.name.toLowerCase().includes(search) ||
-      item.series.toLowerCase().includes(search) ||
-      String(item.character_id).includes(search))
-  );
+  const search = $("catalogSearch").value.trim();
+  const loaded = await api(`/api/catalog?kind=${enc(kind)}&q=${enc(search)}&limit=80`);
+  catalog = loaded.skylanders || [];
+  catalogTotal = loaded.total || catalog.length;
+  renderCatalog();
+}
+
+function renderCatalog() {
   const select = $("catalogSelect");
   select.innerHTML = "";
-  for (const item of filtered.slice(0, 250)) {
+  for (const item of catalog) {
     const option = document.createElement("option");
     option.value = item.index;
     option.textContent = `${item.name} (${item.kind}, ${item.series})`;
     select.appendChild(option);
   }
-  $("catalogCount").textContent = `${filtered.length} matching entries${filtered.length > 250 ? "; showing first 250" : ""}.`;
+  $("catalogCount").textContent = `${catalogTotal} matching entries${catalogTotal > catalog.length ? `; showing first ${catalog.length}` : ""}.`;
 }
 
 function renderLibrary() {
@@ -190,15 +188,18 @@ function renderBackups() {
   )).join("") || "<div class='meta'>No backups.</div>";
 }
 
-$("catalogKind").addEventListener("change", renderCatalog);
-$("catalogSearch").addEventListener("input", renderCatalog);
+$("catalogKind").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
+$("catalogSearch").addEventListener("input", () => {
+  clearTimeout(catalogTimer);
+  catalogTimer = setTimeout(() => loadCatalog().catch(error => say(error.message)), 250);
+});
 
 $("instanceForm").addEventListener("submit", async event => {
   event.preventDefault();
   try {
     say(await api("/api/instance/create-from-catalog", {method:"POST", body: qs(event.target)}));
     event.target.reset();
-    renderCatalog();
+    await loadCatalog();
     await refreshAll();
   } catch (error) { say(error.message); }
 });

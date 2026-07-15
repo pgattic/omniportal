@@ -9,7 +9,7 @@ critical-section = "1"
 embedded-storage = "0.3.1"
 
 [target.'cfg(target_arch = "xtensa")'.dependencies]
-embassy-executor = { version = "0.7", features = ["arch-spin", "executor-thread", "task-arena-size-32768"] }
+embassy-executor = { version = "0.7", features = ["arch-spin", "executor-thread", "task-arena-size-98304"] }
 embassy-net = { version = "0.9.1", features = ["medium-ethernet", "proto-ipv4", "tcp", "udp", "log"] }
 embassy-time = "0.4"
 esp-alloc = "0.8.0"
