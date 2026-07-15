@@ -49,6 +49,16 @@ def get_report(dev) -> bytes:
     )
 
 
+def read_until(ep_in, expected_prefix: bytes) -> bytes:
+    last = b""
+    for _ in range(8):
+        packet = bytes(ep_in.read(REPORT_BYTES, TIMEOUT_MS))
+        if packet.startswith(expected_prefix):
+            return packet
+        last = packet
+    raise RuntimeError(f"Did not receive {expected_prefix!r}; last packet was {last!r}")
+
+
 def main() -> int:
     dev = usb.core.find(idVendor=VID, idProduct=PID)
     if dev is None:
@@ -71,10 +81,7 @@ def main() -> int:
             return 1
 
         set_report(dev, b"A\x01")
-        queued = bytes(ep_in.read(REPORT_BYTES, TIMEOUT_MS))
-        if queued[:4] != b"A\x01\xff\x77":
-            print(f"Unexpected activate response: {queued!r}", file=sys.stderr)
-            return 1
+        queued = read_until(ep_in, b"A\x01\xff\x77")
 
         status = get_report(dev)
         if not status.startswith(b"S"):

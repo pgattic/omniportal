@@ -92,14 +92,20 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     }
 
     fn poll_in_endpoint(&mut self) {
-        let report = self
-            .pop_report()
-            .unwrap_or_else(|| self.state.next_status_report());
-        match self.ep_in.write(&report) {
-            Ok(_) => {}
-            Err(UsbError::WouldBlock) => {
-                self.push_report_front(report);
+        if let Some(report) = self.pop_report() {
+            match self.ep_in.write(&report) {
+                Ok(_) => {}
+                Err(UsbError::WouldBlock) => {
+                    self.push_report_front(report);
+                }
+                Err(_) => {}
             }
+            return;
+        }
+
+        let report = self.state.next_status_report();
+        match self.ep_in.write(&report) {
+            Ok(_) | Err(UsbError::WouldBlock) => {}
             Err(_) => {}
         }
     }
