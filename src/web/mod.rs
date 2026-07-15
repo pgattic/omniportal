@@ -70,6 +70,8 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
             &crate::storage::library_json(),
         )
         .await;
+    } else if method == "GET" && path == "/api/catalog" {
+        write_catalog(socket).await;
     } else if method == "POST" && path == "/api/identity/create" {
         write_storage_result(
             socket,
@@ -80,6 +82,12 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         write_storage_result(
             socket,
             crate::storage::create_instance_from_params(params(query, body).as_str()),
+        )
+        .await;
+    } else if method == "POST" && path == "/api/instance/create-from-catalog" {
+        write_storage_result(
+            socket,
+            crate::storage::create_instance_from_catalog_params(params(query, body).as_str()),
         )
         .await;
     } else if method == "POST" && path == "/api/instance/upload" {
@@ -193,6 +201,37 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     } else {
         write_text(socket, "404 Not Found", "text/plain", "not found\n").await;
     }
+}
+
+#[cfg(target_arch = "xtensa")]
+async fn write_catalog(socket: &mut TcpSocket<'_>) {
+    write_all(
+        socket,
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"skylanders\":[",
+    )
+    .await;
+
+    for (index, entry) in crate::figures::catalog::SKYLANDERS_CATALOG
+        .iter()
+        .enumerate()
+    {
+        if index > 0 {
+            write_all(socket, b",").await;
+        }
+        let body = format!(
+            "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"character_id\":{},\"variant_id\":{}}}",
+            entry.index,
+            entry.game_line.wire_name(),
+            entry.kind.wire_name(),
+            entry.series,
+            entry.name,
+            entry.character_id,
+            entry.variant_id
+        );
+        write_all(socket, body.as_bytes()).await;
+    }
+
+    write_all(socket, b"]}\n").await;
 }
 
 #[cfg(target_arch = "xtensa")]

@@ -16,6 +16,7 @@ input,select,button{font:inherit;padding:8px;border:1px solid #bbb;border-radius
 button{background:#ececec}
 button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row>*{flex:1 1 160px}
 .list{display:grid;gap:8px}
 .item{border:1px solid #ddd;border-radius:4px;padding:8px;background:#fafafa}
 .item strong{display:block}
@@ -39,22 +40,25 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 </section>
 
 <section>
-<h2>Add Identity</h2>
-<form id="identityForm">
-<label>Name<input name="name" required placeholder="Character name"></label>
-<label>Character ID<input name="character_id" inputmode="numeric" required placeholder="Numeric ID"></label>
-<label>Variant ID<input name="variant_id" inputmode="numeric" placeholder="0"></label>
-<label>Source Notes<input name="source" placeholder="Optional notes"></label>
-<button class="primary" type="submit">Create Identity</button>
-</form>
-</section>
-
-<section>
 <h2>Create Instance</h2>
 <form id="instanceForm">
-<label>Identity<select name="identity_id" id="instanceIdentity"></select></label>
+<div class="row">
+<label>Type<select id="catalogKind">
+<option value="">All types</option>
+<option value="character">Characters</option>
+<option value="item">Items</option>
+<option value="level-piece">Level pieces</option>
+<option value="trap">Traps</option>
+<option value="vehicle">Vehicles</option>
+<option value="creation-crystal">Creation crystals</option>
+<option value="trophy">Trophies</option>
+</select></label>
+<label>Search<input id="catalogSearch" placeholder="Filter catalog"></label>
+</div>
+<label>Figure<select name="catalog_index" id="catalogSelect"></select></label>
 <label>Instance Name<input name="name" required placeholder="Save slot name"></label>
-<button class="primary" type="submit">Create Fresh Instance</button>
+<button class="primary" type="submit">Create Instance</button>
+<div class="meta" id="catalogCount"></div>
 </form>
 </section>
 
@@ -62,7 +66,6 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <h2>Upload</h2>
 <form id="uploadInstanceForm">
 <label>Instance Name<input name="name" required placeholder="Imported instance name"></label>
-<label>Parent Identity<select name="identity_id" id="uploadIdentity"><option value="">None</option></select></label>
 <label>Instance Binary<input name="file" type="file" required></label>
 <button type="submit">Upload Instance</button>
 </form>
@@ -72,11 +75,6 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <label>Backup Binary<input name="file" type="file" required></label>
 <button type="submit">Upload Backup</button>
 </form>
-</section>
-
-<section>
-<h2>Identities</h2>
-<div id="identities" class="list"></div>
 </section>
 
 <section>
@@ -97,6 +95,7 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 
 <script>
 let library = {identities:[], instances:[], backups:[], active_instance_id:null};
+let catalog = [];
 
 const $ = id => document.getElementById(id);
 const enc = value => encodeURIComponent(value == null ? "" : value);
@@ -116,7 +115,12 @@ function say(value) {
 async function refreshAll() {
   const status = await api("/status");
   library = await api("/api/library");
+  if (catalog.length === 0) {
+    const loaded = await api("/api/catalog");
+    catalog = loaded.skylanders || [];
+  }
   renderStatus(status);
+  renderCatalog();
   renderLibrary();
 }
 
@@ -125,42 +129,39 @@ function renderStatus(status) {
   $("status").innerHTML =
     `<div>Mode: ${status.mode || "unknown"}</div>` +
     `<div>Active instance: ${status.active_instance ?? "none"}</div>` +
-    `<div>Records: ${storage.identities || 0} identities, ${storage.instances || 0} instances, ${storage.backups || 0} backups</div>` +
+    `<div>Records: ${storage.instances || 0} instances, ${storage.backups || 0} backups</div>` +
     `<div>Storage: ${storage.used_bytes || 0} / ${storage.capacity_bytes || 0} bytes</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
 }
 
+function renderCatalog() {
+  const kind = $("catalogKind").value;
+  const search = $("catalogSearch").value.trim().toLowerCase();
+  const filtered = catalog.filter(item =>
+    (!kind || item.kind === kind) &&
+    (!search ||
+      item.name.toLowerCase().includes(search) ||
+      item.series.toLowerCase().includes(search) ||
+      String(item.character_id).includes(search))
+  );
+  const select = $("catalogSelect");
+  select.innerHTML = "";
+  for (const item of filtered.slice(0, 250)) {
+    const option = document.createElement("option");
+    option.value = item.index;
+    option.textContent = `${item.name} (${item.kind}, ${item.series})`;
+    select.appendChild(option);
+  }
+  $("catalogCount").textContent = `${filtered.length} matching entries${filtered.length > 250 ? "; showing first 250" : ""}.`;
+}
+
 function renderLibrary() {
-  fillIdentitySelect("instanceIdentity", false);
-  fillIdentitySelect("uploadIdentity", true);
-  renderIdentities();
   renderInstances();
   renderBackups();
 }
 
-function fillIdentitySelect(id, includeNone) {
-  const select = $(id);
-  select.innerHTML = includeNone ? `<option value="">None</option>` : "";
-  for (const item of library.identities) {
-    const option = document.createElement("option");
-    option.value = item.id;
-    option.textContent = `#${item.id} ${item.name}`;
-    select.appendChild(option);
-  }
-}
-
 function itemShell(title, meta, actions) {
   return `<div class="item"><strong>${title}</strong><div class="meta">${meta}</div><div class="actions">${actions}</div></div>`;
-}
-
-function renderIdentities() {
-  $("identities").innerHTML = library.identities.map(item => itemShell(
-    `#${item.id} ${item.name}`,
-    `${item.game} character ${item.character_id}, variant ${item.variant_id ?? "none"}, ${item.format}`,
-    `<button onclick="renameRecord('identity',${item.id})">Rename</button>` +
-    `<button onclick="deleteRecord('identity',${item.id})">Delete</button>` +
-    `<a href="/api/identity/${item.id}.json">JSON</a>`
-  )).join("") || "<div class='meta'>No identities.</div>";
 }
 
 function renderInstances() {
@@ -168,7 +169,7 @@ function renderInstances() {
     const active = item.id === library.active_instance_id ? " active" : "";
     return itemShell(
       `#${item.id} ${item.name}${active}`,
-      `${item.game}, ${item.image_len} bytes, crc32 ${item.crc32}, identity ${item.identity_id || "none"}`,
+      `${item.game}, ${item.image_len} bytes, crc32 ${item.crc32}`,
       `<button onclick="selectInstance(${item.id})">Select</button>` +
       `<button onclick="cloneInstance(${item.id})">Clone</button>` +
       `<button onclick="renameRecord('instance',${item.id})">Rename</button>` +
@@ -189,20 +190,15 @@ function renderBackups() {
   )).join("") || "<div class='meta'>No backups.</div>";
 }
 
-$("identityForm").addEventListener("submit", async event => {
-  event.preventDefault();
-  try {
-    say(await api("/api/identity/create", {method:"POST", body: qs(event.target)}));
-    event.target.reset();
-    await refreshAll();
-  } catch (error) { say(error.message); }
-});
+$("catalogKind").addEventListener("change", renderCatalog);
+$("catalogSearch").addEventListener("input", renderCatalog);
 
 $("instanceForm").addEventListener("submit", async event => {
   event.preventDefault();
   try {
-    say(await api("/api/instance/create", {method:"POST", body: qs(event.target)}));
+    say(await api("/api/instance/create-from-catalog", {method:"POST", body: qs(event.target)}));
     event.target.reset();
+    renderCatalog();
     await refreshAll();
   } catch (error) { say(error.message); }
 });
@@ -211,7 +207,7 @@ $("uploadInstanceForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.target;
   const file = form.elements.file.files[0];
-  const query = `name=${enc(form.elements.name.value)}&identity_id=${enc(form.elements.identity_id.value)}`;
+  const query = `name=${enc(form.elements.name.value)}`;
   try {
     say(await api(`/api/instance/upload?${query}`, {method:"POST", body: await file.arrayBuffer()}));
     form.reset();

@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod formats;
 pub mod init;
 
@@ -37,6 +38,9 @@ pub enum FigureKind {
     Vehicle,
     Item,
     Trap,
+    CreationCrystal,
+    LevelPiece,
+    Trophy,
     Unknown,
 }
 
@@ -47,6 +51,9 @@ impl FigureKind {
             Self::Vehicle => 2,
             Self::Item => 3,
             Self::Trap => 4,
+            Self::CreationCrystal => 5,
+            Self::LevelPiece => 6,
+            Self::Trophy => 7,
             Self::Unknown => 255,
         }
     }
@@ -57,6 +64,9 @@ impl FigureKind {
             2 => Self::Vehicle,
             3 => Self::Item,
             4 => Self::Trap,
+            5 => Self::CreationCrystal,
+            6 => Self::LevelPiece,
+            7 => Self::Trophy,
             _ => Self::Unknown,
         }
     }
@@ -67,6 +77,9 @@ impl FigureKind {
             Self::Vehicle => "vehicle",
             Self::Item => "item",
             Self::Trap => "trap",
+            Self::CreationCrystal => "creation-crystal",
+            Self::LevelPiece => "level-piece",
+            Self::Trophy => "trophy",
             Self::Unknown => "unknown",
         }
     }
@@ -79,6 +92,7 @@ pub struct FigureIdentity {
 }
 
 pub fn initialize() {
+    let _ = catalog::SKYLANDERS_CATALOG.len();
     let _ = formats::MAX_FIGURE_IMAGE_BYTES;
     let _ = init::DEFAULT_INSTANCE_NAME;
     let _ = FigureIdentity {

@@ -1,6 +1,7 @@
 use core::cell::RefCell;
 
 use crate::config;
+use crate::figures::catalog::skylanders_catalog_entry;
 use crate::figures::formats::ImageFormat;
 use crate::figures::init::initialize_skylanders_placeholder;
 use crate::figures::{FigureKind, GameLine};
@@ -255,6 +256,51 @@ pub fn create_instance_from_query(query: &str) -> Result<String, StorageError> {
 
 pub fn create_instance_from_params(params: &str) -> Result<String, StorageError> {
     create_instance_from_query(params)
+}
+
+pub fn create_instance_from_catalog_params(params: &str) -> Result<String, StorageError> {
+    let catalog_index = query_param(params, "catalog_index")
+        .and_then(|value| parse_u32(value.as_str()))
+        .and_then(|value| u16::try_from(value).ok())
+        .ok_or(StorageError::BadRequest)?;
+    let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
+    let entry = skylanders_catalog_entry(catalog_index).ok_or(StorageError::NotFound)?;
+
+    with_store_mut(|store| {
+        let image = initialize_skylanders_placeholder(
+            entry.character_id,
+            if entry.has_variant() {
+                Some(entry.variant_id)
+            } else {
+                None
+            },
+        );
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image)?;
+        let image_crc32 = crc32(&image);
+        let instance_id = store.catalog.next_record_id();
+        let generation = store.catalog.next_generation();
+        let instance = CharacterInstance {
+            id: instance_id,
+            name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
+            parent_identity_id: None,
+            game_line: entry.game_line,
+            blob_id,
+            image_format: ImageFormat::SkylandersMifare1k,
+            image_len: image.len() as u32,
+            image_crc32,
+            created_generation: generation,
+            updated_generation: generation,
+        };
+        append_instance_record(store, instance)?;
+        Ok(format!(
+            "{{\"created\":\"instance\",\"id\":{},\"catalog_index\":{},\"blob_id\":{},\"name\":\"{}\",\"figure\":\"{}\"}}\n",
+            instance_id.0,
+            entry.index,
+            blob_id.0,
+            json_escape(instance.name.as_str()),
+            json_escape(entry.name)
+        ))
+    })
 }
 
 pub fn upload_instance_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
