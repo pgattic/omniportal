@@ -69,22 +69,11 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <label>Instance Binary<input name="file" type="file" required></label>
 <button type="submit">Upload Instance</button>
 </form>
-<form id="uploadBackupForm">
-<label>Backup Name<input name="name" required placeholder="Backup name"></label>
-<label>Source Notes<input name="source" placeholder="Optional notes"></label>
-<label>Backup Binary<input name="file" type="file" required></label>
-<button type="submit">Upload Backup</button>
-</form>
 </section>
 
 <section>
 <h2>Instances</h2>
 <div id="instances" class="list"></div>
-</section>
-
-<section>
-<h2>Backups</h2>
-<div id="backups" class="list"></div>
 </section>
 
 <section>
@@ -94,7 +83,7 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 </main>
 
 <script>
-let library = {identities:[], instances:[], backups:[], active_instance_id:null};
+let library = {identities:[], instances:[], active_instance_id:null};
 let catalog = [];
 let catalogTotal = 0;
 let catalogTimer = 0;
@@ -127,7 +116,7 @@ function renderStatus(status) {
   $("status").innerHTML =
     `<div>Mode: ${status.mode || "unknown"}</div>` +
     `<div>Active instance: ${status.active_instance ?? "none"}</div>` +
-    `<div>Records: ${storage.instances || 0} instances, ${storage.backups || 0} backups</div>` +
+    `<div>Records: ${storage.instances || 0} instances</div>` +
     `<div>Storage: ${storage.used_bytes || 0} / ${storage.capacity_bytes || 0} bytes</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
 }
@@ -155,7 +144,6 @@ function renderCatalog() {
 
 function renderLibrary() {
   renderInstances();
-  renderBackups();
 }
 
 function itemShell(title, meta, actions) {
@@ -175,17 +163,6 @@ function renderInstances() {
       `<a href="/api/instance/${item.id}.bin">Download</a>`
     );
   }).join("") || "<div class='meta'>No instances.</div>";
-}
-
-function renderBackups() {
-  $("backups").innerHTML = library.backups.map(item => itemShell(
-    `#${item.id} ${item.name}`,
-    `${item.game}, ${item.image_len} bytes, crc32 ${item.crc32}`,
-    `<button onclick="renameRecord('backup',${item.id})">Rename</button>` +
-    `<button onclick="deleteRecord('backup',${item.id})">Delete</button>` +
-    `<a href="/api/backup/${item.id}.bin">Download</a>` +
-    `<a href="/api/backup/${item.id}.json">JSON</a>`
-  )).join("") || "<div class='meta'>No backups.</div>";
 }
 
 $("catalogKind").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
@@ -211,18 +188,6 @@ $("uploadInstanceForm").addEventListener("submit", async event => {
   const query = `name=${enc(form.elements.name.value)}`;
   try {
     say(await api(`/api/instance/upload?${query}`, {method:"POST", body: await file.arrayBuffer()}));
-    form.reset();
-    await refreshAll();
-  } catch (error) { say(error.message); }
-});
-
-$("uploadBackupForm").addEventListener("submit", async event => {
-  event.preventDefault();
-  const form = event.target;
-  const file = form.elements.file.files[0];
-  const query = `name=${enc(form.elements.name.value)}&source=${enc(form.elements.source.value)}`;
-  try {
-    say(await api(`/api/backup/upload?${query}`, {method:"POST", body: await file.arrayBuffer()}));
     form.reset();
     await refreshAll();
   } catch (error) { say(error.message); }

@@ -104,8 +104,6 @@ Useful read endpoints:
 * `GET /api/catalog` - list built-in Skylanders catalog entries
 * `GET /api/identity/1.json` - download an identity sidecar
 * `GET /api/instance/1.bin` - download an instance image
-* `GET /api/backup/1.json` - download backup metadata
-* `GET /api/backup/1.bin` - download a backup blob
 
 Useful mutation endpoints:
 
@@ -115,7 +113,6 @@ curl -X POST -d 'catalog_index=0&name=Save+Slot+1' 'http://192.168.4.1/api/insta
 curl -X POST -d 'source_id=1&name=Jacob%27s+Trigger+Happy' 'http://192.168.4.1/api/instance/clone'
 curl -X POST -d 'id=1' 'http://192.168.4.1/api/instance/select'
 curl -X POST -d 'id=1&name=Renamed+Trigger+Happy' 'http://192.168.4.1/api/instance/rename'
-curl -X POST -d 'id=1&name=Renamed+Backup' 'http://192.168.4.1/api/backup/rename'
 curl -X POST 'http://192.168.4.1/api/instance/clear-active'
 curl -X POST 'http://192.168.4.1/api/storage/compact'
 ```
@@ -124,14 +121,12 @@ Raw upload endpoints take query-string metadata and a binary request body:
 
 ```sh
 curl -X POST --data-binary @figure.bin 'http://192.168.4.1/api/instance/upload?name=Imported+Figure'
-curl -X POST --data-binary @backup.bin 'http://192.168.4.1/api/backup/upload?name=Raw+Trigger+Happy+Backup'
 ```
 
 Delete endpoints use POST as well:
 
 ```sh
 curl -X POST -d 'id=1' 'http://192.168.4.1/api/instance/delete'
-curl -X POST -d 'id=1' 'http://192.168.4.1/api/backup/delete'
 ```
 
 Fresh Skylanders instances are currently placeholder 1 KiB images with an

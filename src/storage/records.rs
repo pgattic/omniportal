@@ -5,7 +5,6 @@ pub const MAX_RECORD_NAME_BYTES: usize = 64;
 pub const MAX_SOURCE_NOTES_BYTES: usize = 96;
 pub const MAX_IDENTITIES: usize = 32;
 pub const MAX_INSTANCES: usize = 64;
-pub const MAX_BACKUPS: usize = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RecordId(pub u32);
@@ -78,19 +77,6 @@ pub struct CharacterInstance {
     pub image_crc32: u32,
     pub created_generation: u32,
     pub updated_generation: u32,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BackupBlob {
-    pub id: RecordId,
-    pub name: FixedText<MAX_RECORD_NAME_BYTES>,
-    pub game_line: Option<GameLine>,
-    pub blob_id: BlobId,
-    pub image_format: ImageFormat,
-    pub image_len: u32,
-    pub image_crc32: u32,
-    pub source_notes: FixedText<MAX_SOURCE_NOTES_BYTES>,
-    pub generation: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

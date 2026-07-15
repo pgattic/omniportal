@@ -10,8 +10,8 @@ use crate::platform::println;
 #[cfg(target_arch = "xtensa")]
 use crate::platform::StorageFlash;
 use crate::storage::records::{
-    BackupBlob, BlobId, CharacterIdentity, CharacterInstance, FixedText, RecordId, StoredBlob,
-    MAX_BACKUPS, MAX_IDENTITIES, MAX_INSTANCES, MAX_RECORD_NAME_BYTES,
+    BlobId, CharacterIdentity, CharacterInstance, FixedText, RecordId, StoredBlob, MAX_IDENTITIES,
+    MAX_INSTANCES, MAX_RECORD_NAME_BYTES,
 };
 use crate::storage::wear::{
     DEFAULT_COMMIT_DEBOUNCE_MS, JOURNAL_RECORD_HEADER_BYTES, JOURNAL_RECORD_MAGIC,
@@ -30,8 +30,6 @@ const RECORD_KIND_IDENTITY_UPSERT: u8 = 1;
 const RECORD_KIND_IDENTITY_DELETE: u8 = 2;
 const RECORD_KIND_INSTANCE_UPSERT: u8 = 3;
 const RECORD_KIND_INSTANCE_DELETE: u8 = 4;
-const RECORD_KIND_BACKUP_UPSERT: u8 = 5;
-const RECORD_KIND_BACKUP_DELETE: u8 = 6;
 const RECORD_KIND_BLOB_DATA: u8 = 7;
 const RECORD_KIND_CONFIG_UPSERT: u8 = 8;
 const RECORD_KIND_FORMAT_MARKER: u8 = 254;
@@ -84,10 +82,9 @@ pub fn init() {
     let _ = scan;
     #[cfg(target_arch = "xtensa")]
     println!(
-        "Storage scan: identities={}, instances={}, backups={}, used={} bytes, status={}",
+        "Storage scan: identities={}, instances={}, used={} bytes, status={}",
         catalog.identity_count(),
         catalog.instance_count(),
-        catalog.backup_count(),
         catalog.write_offset,
         if scan.is_ok() { "ok" } else { "needs-format" }
     );
@@ -131,29 +128,6 @@ pub fn identity_json(id: RecordId) -> Result<String, StorageError> {
                     identity.kind.wire_name(),
                     identity.image_format.wire_name(),
                     json_escape(identity.source_notes.as_str())
-                )
-            })
-            .ok_or(StorageError::NotFound)
-    })
-    .ok_or(StorageError::Uninitialized)?
-}
-
-pub fn backup_json(id: RecordId) -> Result<String, StorageError> {
-    with_store(|store| {
-        store
-            .catalog
-            .backup(id)
-            .map(|backup| {
-                format!(
-                    "{{\"id\":{},\"name\":\"{}\",\"game\":\"{}\",\"blob_id\":{},\"format\":\"{}\",\"image_len\":{},\"crc32\":{},\"source\":\"{}\"}}\n",
-                    backup.id.0,
-                    json_escape(backup.name.as_str()),
-                    backup.game_line.map(|game| game.wire_name()).unwrap_or("unknown"),
-                    backup.blob_id.0,
-                    backup.image_format.wire_name(),
-                    backup.image_len,
-                    backup.image_crc32,
-                    json_escape(backup.source_notes.as_str())
                 )
             })
             .ok_or(StorageError::NotFound)
@@ -345,42 +319,6 @@ pub fn upload_instance_from_params(params: &str, image: &[u8]) -> Result<String,
     })
 }
 
-pub fn upload_backup_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
-    let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
-    let source = query_param(params, "source").unwrap_or_default();
-    if image.is_empty() {
-        return Err(StorageError::BadRequest);
-    }
-
-    with_store_mut(|store| {
-        let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
-        let id = store.catalog.next_record_id();
-        let generation = store.catalog.next_generation();
-        let backup = BackupBlob {
-            id,
-            name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
-            game_line: Some(GameLine::Skylanders),
-            blob_id,
-            image_format: ImageFormat::SkylandersMifare1k,
-            image_len: image.len() as u32,
-            image_crc32: crc32(image),
-            source_notes: if source.is_empty() {
-                FixedText::empty()
-            } else {
-                FixedText::from_str(&source).map_err(|_| StorageError::BadRequest)?
-            },
-            generation,
-        };
-        append_backup_record(store, backup)?;
-        Ok(format!(
-            "{{\"uploaded\":\"backup\",\"id\":{},\"blob_id\":{},\"name\":\"{}\"}}\n",
-            id.0,
-            blob_id.0,
-            json_escape(backup.name.as_str())
-        ))
-    })
-}
-
 pub fn clone_instance_from_params(params: &str) -> Result<String, StorageError> {
     let source_id = query_param(params, "source_id")
         .or_else(|| query_param(params, "id"))
@@ -464,12 +402,6 @@ pub fn delete_instance_from_query(query: &str) -> Result<String, StorageError> {
     )
 }
 
-pub fn delete_backup_from_query(query: &str) -> Result<String, StorageError> {
-    delete_record_from_query(query, "backup", RECORD_KIND_BACKUP_DELETE, |catalog, id| {
-        catalog.delete_backup(id)
-    })
-}
-
 pub fn rename_instance_from_query(query: &str) -> Result<String, StorageError> {
     let id = query_param(query, "id")
         .and_then(|value| parse_u32(value.as_str()))
@@ -497,24 +429,6 @@ pub fn rename_instance_from_query(query: &str) -> Result<String, StorageError> {
     })
 }
 
-pub fn rename_backup_from_query(query: &str) -> Result<String, StorageError> {
-    let id = query_param(query, "id")
-        .and_then(|value| parse_u32(value.as_str()))
-        .ok_or(StorageError::BadRequest)?;
-    let name = query_param(query, "name").ok_or(StorageError::BadRequest)?;
-
-    with_store_mut(|store| {
-        let mut backup = store
-            .catalog
-            .backup(RecordId(id))
-            .ok_or(StorageError::NotFound)?;
-        backup.name = FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?;
-        backup.generation = store.catalog.next_generation();
-        append_backup_record(store, backup)?;
-        Ok(format!("{{\"renamed\":\"backup\",\"id\":{}}}\n", id))
-    })
-}
-
 pub fn read_instance_blob(instance_id: RecordId) -> Result<Vec<u8>, StorageError> {
     with_store_mut(|store| {
         let instance = store
@@ -522,16 +436,6 @@ pub fn read_instance_blob(instance_id: RecordId) -> Result<Vec<u8>, StorageError
             .instance(instance_id)
             .ok_or(StorageError::NotFound)?;
         read_blob(store, instance.blob_id)
-    })
-}
-
-pub fn read_backup_blob(backup_id: RecordId) -> Result<Vec<u8>, StorageError> {
-    with_store_mut(|store| {
-        let backup = store
-            .catalog
-            .backup(backup_id)
-            .ok_or(StorageError::NotFound)?;
-        read_blob(store, backup.blob_id)
     })
 }
 
@@ -571,13 +475,7 @@ pub fn compact_storage() -> Result<String, StorageError> {
                 .iter()
                 .flatten()
                 .any(|instance| instance.blob_id == blob.id);
-            let is_live_backup = store
-                .catalog
-                .backups
-                .iter()
-                .flatten()
-                .any(|backup| backup.blob_id == blob.id);
-            if is_live_instance || is_live_backup {
+            if is_live_instance {
                 blob_ids.push(blob.id);
             }
         }
@@ -588,7 +486,6 @@ pub fn compact_storage() -> Result<String, StorageError> {
 
         let identities = store.catalog.identities;
         let instances = store.catalog.instances;
-        let backups = store.catalog.backups;
         let active_instance_id = store.catalog.active_instance_id;
         let next_record_id = store.catalog.next_record_id;
         let next_blob_id = store.catalog.next_blob_id;
@@ -664,13 +561,6 @@ pub fn compact_storage() -> Result<String, StorageError> {
                 &encode_instance(&instance),
             )?;
             store.catalog.upsert_instance(instance)?;
-            generation += 1;
-        }
-
-        for backup in backups.iter().flatten().copied() {
-            let mut backup = backup;
-            backup.generation = generation;
-            append_backup_record(store, backup)?;
             generation += 1;
         }
 
@@ -809,8 +699,7 @@ impl StorageError {
 struct Catalog {
     identities: [Option<CharacterIdentity>; MAX_IDENTITIES],
     instances: [Option<CharacterInstance>; MAX_INSTANCES],
-    backups: [Option<BackupBlob>; MAX_BACKUPS],
-    blobs: [Option<StoredBlob>; MAX_INSTANCES + MAX_BACKUPS],
+    blobs: [Option<StoredBlob>; MAX_INSTANCES],
     active_instance_id: Option<RecordId>,
     write_offset: u32,
     next_record_id: u32,
@@ -824,8 +713,7 @@ impl Catalog {
         Self {
             identities: [None; MAX_IDENTITIES],
             instances: [None; MAX_INSTANCES],
-            backups: [None; MAX_BACKUPS],
-            blobs: [None; MAX_INSTANCES + MAX_BACKUPS],
+            blobs: [None; MAX_INSTANCES],
             active_instance_id: None,
             write_offset: 0,
             next_record_id: 1,
@@ -879,14 +767,6 @@ impl Catalog {
             .copied()
     }
 
-    fn backup(&self, id: RecordId) -> Option<BackupBlob> {
-        self.backups
-            .iter()
-            .flatten()
-            .find(|item| item.id == id)
-            .copied()
-    }
-
     fn blob(&self, id: BlobId) -> Option<StoredBlob> {
         self.blobs
             .iter()
@@ -901,10 +781,6 @@ impl Catalog {
 
     fn upsert_instance(&mut self, instance: CharacterInstance) -> Result<(), StorageError> {
         upsert_by_id(&mut self.instances, instance, |item| item.id, instance.id)
-    }
-
-    fn upsert_backup(&mut self, backup: BackupBlob) -> Result<(), StorageError> {
-        upsert_by_id(&mut self.backups, backup, |item| item.id, backup.id)
     }
 
     fn upsert_blob(&mut self, blob: StoredBlob) -> Result<(), StorageError> {
@@ -922,10 +798,6 @@ impl Catalog {
         delete_by_id(&mut self.instances, |item| item.id, id)
     }
 
-    fn delete_backup(&mut self, id: RecordId) -> Result<(), StorageError> {
-        delete_by_id(&mut self.backups, |item| item.id, id)
-    }
-
     fn identity_count(&self) -> usize {
         self.identities.iter().filter(|item| item.is_some()).count()
     }
@@ -934,16 +806,11 @@ impl Catalog {
         self.instances.iter().filter(|item| item.is_some()).count()
     }
 
-    fn backup_count(&self) -> usize {
-        self.backups.iter().filter(|item| item.is_some()).count()
-    }
-
     fn status_json(&self) -> String {
         format!(
-            "{{\"storage\":\"ok\",\"identities\":{},\"instances\":{},\"backups\":{},\"active_instance_id\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
+            "{{\"storage\":\"ok\",\"identities\":{},\"instances\":{},\"active_instance_id\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
             self.identity_count(),
             self.instance_count(),
-            self.backup_count(),
             option_record_id_json(self.active_instance_id),
             self.write_offset,
             config::STORAGE_FLASH_BYTES,
@@ -986,23 +853,6 @@ impl Catalog {
                 instance.blob_id.0,
                 instance.image_len,
                 instance.image_crc32
-            ));
-        }
-        out.push_str("],\"backups\":[");
-        first = true;
-        for backup in self.backups.iter().flatten() {
-            if !first {
-                out.push(',');
-            }
-            first = false;
-            out.push_str(&format!(
-                "{{\"id\":{},\"name\":\"{}\",\"game\":\"{}\",\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
-                backup.id.0,
-                json_escape(backup.name.as_str()),
-                backup.game_line.map(|game| game.wire_name()).unwrap_or("unknown"),
-                backup.blob_id.0,
-                backup.image_len,
-                backup.image_crc32
             ));
         }
         out.push_str("],\"active_instance_id\":");
@@ -1125,16 +975,6 @@ fn apply_record(
             catalog.observe_record_id(record.id, record.generation);
             let _ = catalog.delete_instance(RecordId(record.id));
         }
-        RECORD_KIND_BACKUP_UPSERT => {
-            if let Some(backup) = decode_backup(record.id, record.generation, payload) {
-                catalog.observe_record_id(record.id, record.generation);
-                catalog.upsert_backup(backup)?;
-            }
-        }
-        RECORD_KIND_BACKUP_DELETE => {
-            catalog.observe_record_id(record.id, record.generation);
-            let _ = catalog.delete_backup(RecordId(record.id));
-        }
         RECORD_KIND_BLOB_DATA => {
             catalog.observe_blob_id(record.id, record.generation);
             catalog.upsert_blob(StoredBlob {
@@ -1196,18 +1036,6 @@ fn append_instance_record(
         &encode_instance(&instance),
     )?;
     store.catalog.upsert_instance(instance)
-}
-
-fn append_backup_record(store: &mut Store, backup: BackupBlob) -> Result<(), StorageError> {
-    append_record(
-        &mut store.flash,
-        &mut store.catalog,
-        RECORD_KIND_BACKUP_UPSERT,
-        backup.id.0,
-        backup.generation,
-        &encode_backup(&backup),
-    )?;
-    store.catalog.upsert_backup(backup)
 }
 
 fn append_config_record(
@@ -1408,65 +1236,6 @@ fn decode_instance(id: u32, _generation: u32, payload: &[u8]) -> Option<Characte
     })
 }
 
-fn encode_backup(backup: &BackupBlob) -> [u8; 192] {
-    let mut out = [0; 192];
-    out[0] = backup.game_line.map(|game| game.as_u8()).unwrap_or(0);
-    out[1] = backup.image_format.as_u8();
-    out[2] = backup.name.len() as u8;
-    out[3] = backup.source_notes.len() as u8;
-    out[4..8].copy_from_slice(&backup.blob_id.0.to_le_bytes());
-    out[8..12].copy_from_slice(&backup.image_len.to_le_bytes());
-    out[12..16].copy_from_slice(&backup.image_crc32.to_le_bytes());
-    out[16..20].copy_from_slice(&backup.generation.to_le_bytes());
-    out[24..24 + backup.name.len()].copy_from_slice(backup.name.raw_bytes());
-    let source_start = 24 + MAX_RECORD_NAME_BYTES;
-    out[source_start..source_start + backup.source_notes.len()]
-        .copy_from_slice(backup.source_notes.raw_bytes());
-    out
-}
-
-fn decode_backup(id: u32, generation: u32, payload: &[u8]) -> Option<BackupBlob> {
-    if payload.len() < 192 {
-        return None;
-    }
-    let name_len = payload[2] as usize;
-    let source_len = payload[3] as usize;
-    let source_start = 24 + MAX_RECORD_NAME_BYTES;
-    if name_len > MAX_RECORD_NAME_BYTES
-        || source_len > crate::storage::records::MAX_SOURCE_NOTES_BYTES
-        || 24 + name_len > source_start
-        || source_start + source_len > payload.len()
-    {
-        return None;
-    }
-
-    let name = core::str::from_utf8(&payload[24..24 + name_len]).ok()?;
-    let source = if source_len == 0 {
-        FixedText::empty()
-    } else {
-        FixedText::from_str(
-            core::str::from_utf8(&payload[source_start..source_start + source_len]).ok()?,
-        )
-        .ok()?
-    };
-
-    Some(BackupBlob {
-        id: RecordId(id),
-        name: FixedText::from_str(name).ok()?,
-        game_line: if payload[0] == 0 {
-            None
-        } else {
-            Some(GameLine::from_u8(payload[0])?)
-        },
-        image_format: ImageFormat::from_u8(payload[1])?,
-        blob_id: BlobId(u32::from_le_bytes(payload[4..8].try_into().ok()?)),
-        image_len: u32::from_le_bytes(payload[8..12].try_into().ok()?),
-        image_crc32: u32::from_le_bytes(payload[12..16].try_into().ok()?),
-        source_notes: source,
-        generation,
-    })
-}
-
 fn encode_config(active_instance_id: Option<RecordId>) -> [u8; 8] {
     let mut out = [0; 8];
     out[0] = u8::from(active_instance_id.is_some());
@@ -1616,20 +1385,6 @@ mod tests {
         }
     }
 
-    fn test_backup() -> BackupBlob {
-        BackupBlob {
-            id: RecordId(9),
-            name: FixedText::from_str("Original backup").unwrap(),
-            game_line: Some(GameLine::Skylanders),
-            blob_id: BlobId(3),
-            image_format: ImageFormat::SkylandersMifare1k,
-            image_len: 1024,
-            image_crc32: 0xfeed_beef,
-            source_notes: FixedText::from_str("dumped").unwrap(),
-            generation: 14,
-        }
-    }
-
     #[test]
     fn decodes_form_params_and_numbers() {
         assert_eq!(
@@ -1682,10 +1437,9 @@ mod tests {
     }
 
     #[test]
-    fn identity_instance_and_backup_payloads_round_trip() {
+    fn identity_and_instance_payloads_round_trip() {
         let identity = test_identity();
         let instance = test_instance();
-        let backup = test_backup();
 
         assert_eq!(
             decode_identity(
@@ -1702,10 +1456,6 @@ mod tests {
                 &encode_instance(&instance)
             ),
             Some(instance)
-        );
-        assert_eq!(
-            decode_backup(backup.id.0, backup.generation, &encode_backup(&backup)),
-            Some(backup)
         );
     }
 

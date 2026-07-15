@@ -104,12 +104,6 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
             crate::storage::upload_instance_from_params(query, body),
         )
         .await;
-    } else if method == "POST" && path == "/api/backup/upload" {
-        write_storage_result(
-            socket,
-            crate::storage::upload_backup_from_params(query, body),
-        )
-        .await;
     } else if method == "POST" && path == "/api/instance/clone" {
         write_storage_result(
             socket,
@@ -132,18 +126,6 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         write_storage_result(
             socket,
             crate::storage::delete_instance_from_query(params(query, body).as_str()),
-        )
-        .await;
-    } else if method == "POST" && path == "/api/backup/delete" {
-        write_storage_result(
-            socket,
-            crate::storage::delete_backup_from_query(params(query, body).as_str()),
-        )
-        .await;
-    } else if method == "POST" && path == "/api/backup/rename" {
-        write_storage_result(
-            socket,
-            crate::storage::rename_backup_from_query(params(query, body).as_str()),
         )
         .await;
     } else if method == "POST" && path == "/api/instance/rename" {
@@ -180,27 +162,6 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         .and_then(|raw| raw.parse::<u32>().ok())
     {
         match crate::storage::read_instance_blob(crate::storage::records::RecordId(id)) {
-            Ok(data) => write_binary(socket, "200 OK", "application/octet-stream", &data).await,
-            Err(error) => {
-                write_text(socket, error.status_code(), "text/plain", error.message()).await
-            }
-        }
-    } else if let Some(id) = path
-        .strip_prefix("/api/backup/")
-        .and_then(|tail| tail.strip_suffix(".json"))
-        .and_then(|raw| raw.parse::<u32>().ok())
-    {
-        write_storage_result(
-            socket,
-            crate::storage::backup_json(crate::storage::records::RecordId(id)),
-        )
-        .await;
-    } else if let Some(id) = path
-        .strip_prefix("/api/backup/")
-        .and_then(|tail| tail.strip_suffix(".bin"))
-        .and_then(|raw| raw.parse::<u32>().ok())
-    {
-        match crate::storage::read_backup_blob(crate::storage::records::RecordId(id)) {
             Ok(data) => write_binary(socket, "200 OK", "application/octet-stream", &data).await,
             Err(error) => {
                 write_text(socket, error.status_code(), "text/plain", error.message()).await
