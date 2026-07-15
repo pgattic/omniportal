@@ -4,9 +4,9 @@ use crate::config;
 use crate::figures::formats::ImageFormat;
 use crate::figures::init::initialize_skylanders_placeholder;
 use crate::figures::{FigureKind, GameLine};
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 use crate::platform::println;
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 use crate::platform::StorageFlash;
 use crate::storage::records::{
     BackupBlob, BlobId, CharacterIdentity, CharacterInstance, FixedText, RecordId, StoredBlob,
@@ -19,7 +19,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use critical_section::Mutex;
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 use embassy_time::{Duration, Timer};
 
 pub mod records;
@@ -39,12 +39,12 @@ const ERASED_WORD: [u8; 4] = [0xff; 4];
 
 static STORE: Mutex<RefCell<Option<Store>>> = Mutex::new(RefCell::new(None));
 
-#[cfg(test)]
+#[cfg(not(target_arch = "xtensa"))]
 struct StorageFlash {
     bytes: Vec<u8>,
 }
 
-#[cfg(test)]
+#[cfg(not(target_arch = "xtensa"))]
 impl StorageFlash {
     fn new() -> Self {
         let mut bytes = Vec::new();
@@ -79,6 +79,9 @@ pub fn init() {
     let mut flash = StorageFlash::new();
     let mut catalog = Catalog::new();
     let scan = scan_flash(&mut flash, &mut catalog);
+    #[cfg(not(target_arch = "xtensa"))]
+    let _ = scan;
+    #[cfg(target_arch = "xtensa")]
     println!(
         "Storage scan: identities={}, instances={}, backups={}, used={} bytes, status={}",
         catalog.identity_count(),
@@ -93,7 +96,7 @@ pub fn init() {
     });
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 #[embassy_executor::task]
 pub async fn run() {
     loop {

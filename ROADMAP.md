@@ -74,11 +74,12 @@ Recommended crate layout (single binary crate to start; split into internal modu
 
     src/
       main.rs              - thin firmware entry point
+      lib.rs               - shared library entry point for portable logic and host tests
       platform/
         mod.rs              - selected platform exports used by shared modules
         esp32s3_n16r8/
           mod.rs            - ESP32-S3 board entry point, task spawning, heap/timer/WiFi setup
-          board.rs          - AP SSID/IP, flash region, LED pin, and board constants
+          board.rs          - AP SSID/IP, flash region, and board constants
           wifi.rs           - ESP WiFi init, open AP setup, network stack bring-up
           storage_flash.rs  - ESP flash adapter used by storage
           log.rs            - ESP logging export

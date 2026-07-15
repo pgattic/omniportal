@@ -36,20 +36,25 @@ Flash and monitor:
 espflash flash --monitor target/xtensa-esp32s3-none-elf/release/omniportal
 ```
 
-## Firmware Structure
+## Code Structure
 
-The firmware is currently a single binary crate with subsystem stubs wired into
-the entry point:
+The project is still one package, but the shared library surface is separated
+from ESP32-S3 firmware wiring:
 
-* `dhcp.rs` - small DHCPv4 server for AP clients
-* `web/` - HTTP routes and embedded UI
-* `usb/` - future portal USB device modes
-* `figures/` - future figure identity and image helpers
-* `storage/` - flash-backed append-only catalog and blob records
+* `lib.rs` - portable library entry point; host builds expose shared logic
+* `main.rs` - thin ESP32-S3 firmware entry point
+* `figures/` - figure identity and image helpers
+* `storage/` - flash-backed catalog, records, and host-testable journal logic
+* `usb/` - portal protocol constants and packet helpers
+* `web/` - HTTP parsing plus ESP32-S3 server wiring
+* `state.rs` - shared mode/selection state
+* `dhcp.rs` - ESP32-S3 DHCPv4 server for AP clients
 * `platform/esp32s3_n16r8/` - ESP32-S3 board entrypoint, WiFi, logging,
   flash adapter, heap setup, and board constants
-* `state.rs` - shared mode/selection state
 * `config.rs` - temporary facade over platform board constants
+
+Firmware-only modules are compiled for the Xtensa target. Host builds compile
+the portable library logic for tests and future tooling.
 
 The USB subsystem task is intentionally idle for now. WiFi/Web are active, and
 storage scans a flash-backed append-only journal at boot.

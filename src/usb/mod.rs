@@ -1,4 +1,4 @@
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 use embassy_time::{Duration, Timer};
 
 pub mod infinity;
@@ -9,7 +9,7 @@ pub fn init() {
     let _ = (infinity::VID, infinity::PID);
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 #[embassy_executor::task]
 pub async fn run() {
     loop {

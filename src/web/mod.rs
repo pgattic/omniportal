@@ -1,11 +1,11 @@
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 use crate::platform::println;
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 use alloc::format;
 use alloc::string::String;
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 use embassy_net::{tcp::TcpSocket, Stack};
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 use embassy_time::{Duration, Timer};
 
 pub mod routes;
@@ -18,7 +18,7 @@ pub fn init() {
     let _ = ui_html::INDEX_HTML;
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 #[embassy_executor::task]
 pub async fn run(stack: Stack<'static>) {
     stack.wait_config_up().await;
@@ -43,7 +43,7 @@ pub async fn run(stack: Stack<'static>) {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     let method = routes::request_method(request).unwrap_or("");
     let Some(target) = routes::request_target(request) else {
@@ -195,7 +195,7 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<usize, ()> {
     let mut read = socket.read(buffer).await.map_err(|_| ())?;
     loop {
@@ -229,11 +229,11 @@ async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<u
     }
 }
 
-fn split_target(target: &str) -> (&str, &str) {
+pub fn split_target(target: &str) -> (&str, &str) {
     target.split_once('?').unwrap_or((target, ""))
 }
 
-fn params(query: &str, body: &[u8]) -> String {
+pub fn params(query: &str, body: &[u8]) -> String {
     if !query.is_empty() {
         String::from(query)
     } else {
@@ -243,18 +243,18 @@ fn params(query: &str, body: &[u8]) -> String {
     }
 }
 
-fn request_body(request: &[u8]) -> Option<&[u8]> {
+pub fn request_body(request: &[u8]) -> Option<&[u8]> {
     body_start(request).map(|start| &request[start..])
 }
 
-fn body_start(request: &[u8]) -> Option<usize> {
+pub fn body_start(request: &[u8]) -> Option<usize> {
     request
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
         .map(|index| index + 4)
 }
 
-fn content_length(request: &[u8]) -> Option<usize> {
+pub fn content_length(request: &[u8]) -> Option<usize> {
     let header = core::str::from_utf8(request).ok()?;
     let header = header.split("\r\n\r\n").next().unwrap_or(header);
     for line in header.lines() {
@@ -267,7 +267,7 @@ fn content_length(request: &[u8]) -> Option<usize> {
     None
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 async fn write_storage_result(
     socket: &mut TcpSocket<'_>,
     result: Result<String, crate::storage::StorageError>,
@@ -278,7 +278,7 @@ async fn write_storage_result(
     }
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 async fn write_text(socket: &mut TcpSocket<'_>, status: &str, content_type: &str, body: &str) {
     let header = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -288,7 +288,7 @@ async fn write_text(socket: &mut TcpSocket<'_>, status: &str, content_type: &str
     write_all(socket, body.as_bytes()).await;
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 async fn write_binary(socket: &mut TcpSocket<'_>, status: &str, content_type: &str, body: &[u8]) {
     let header = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -298,7 +298,7 @@ async fn write_binary(socket: &mut TcpSocket<'_>, status: &str, content_type: &s
     write_all(socket, body).await;
 }
 
-#[cfg(not(test))]
+#[cfg(target_arch = "xtensa")]
 async fn write_all(socket: &mut TcpSocket<'_>, mut bytes: &[u8]) {
     while !bytes.is_empty() {
         match socket.write(bytes).await {
