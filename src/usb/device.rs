@@ -67,6 +67,8 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     protocol: u8,
     storage_poll_ticks: u8,
     active_selection_marker: Option<(u32, u32)>,
+    last_logged_query: Option<(u8, u8)>,
+    repeated_query_count: u16,
 }
 
 impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
@@ -96,6 +98,8 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             protocol: 1,
             storage_poll_ticks: 0,
             active_selection_marker: None,
+            last_logged_query: None,
+            repeated_query_count: 0,
         }
     }
 
@@ -150,7 +154,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     }
 
     fn handle_command_source(&mut self, source: &str, command: &[u8]) {
-        let should_log = should_log_command(command);
+        let should_log = self.should_log_command(command);
         if should_log {
             log_command(source, command);
         }
@@ -169,6 +173,24 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                 command.first().copied().unwrap_or(0)
             );
         }
+    }
+
+    fn should_log_command(&mut self, command: &[u8]) -> bool {
+        if command.first().copied() == Some(b'Q') {
+            let query = (byte(command, 1), byte(command, 2));
+            if Some(query) != self.last_logged_query {
+                self.last_logged_query = Some(query);
+                self.repeated_query_count = 0;
+                return true;
+            }
+            self.repeated_query_count = self.repeated_query_count.saturating_add(1);
+            return self.repeated_query_count == 128;
+        }
+
+        matches!(
+            command.first().copied().unwrap_or(0),
+            b'W' | b'M' | b'J' | b'L' | b'V' | b'Z'
+        )
     }
 
     fn poll_active_entity(&mut self) {
@@ -268,13 +290,6 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     fn is_interface_request(&self, req: &Request) -> bool {
         req.index as u8 == u8::from(self.iface)
     }
-}
-
-fn should_log_command(command: &[u8]) -> bool {
-    matches!(
-        command.first().copied().unwrap_or(0),
-        b'Q' | b'W' | b'M' | b'J' | b'L' | b'V' | b'Z'
-    )
 }
 
 fn log_command(source: &str, command: &[u8]) {

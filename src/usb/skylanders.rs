@@ -352,8 +352,9 @@ pub fn handle_command(state: &mut PortalState, command: &[u8]) -> Option<Command
 }
 
 fn command_slot(slot_id: u8) -> Option<u8> {
-    if (FIRST_FIGURE_SLOT_ID..FIRST_FIGURE_SLOT_ID + MAX_FIGURES as u8).contains(&slot_id) {
-        Some(slot_id & 0x0f)
+    let slot = slot_id & 0x0f;
+    if (slot as usize) < MAX_FIGURES {
+        Some(slot)
     } else {
         None
     }
@@ -383,6 +384,8 @@ mod tests {
         assert_eq!(figure_slot_id(0), Some(0x10));
         assert_eq!(figure_slot_id(15), Some(0x1f));
         assert_eq!(figure_slot_id(16), None);
+        assert_eq!(command_slot(0x10), Some(0));
+        assert_eq!(command_slot(0x20), Some(0));
     }
 
     #[test]
