@@ -20,7 +20,9 @@ pub const HID_SET_REPORT_REQUEST_TYPE: u8 = 0x21;
 pub const HID_SET_REPORT_REQUEST: u8 = 0x09;
 pub const HID_GET_REPORT_REQUEST: u8 = 0x01;
 pub const HID_GET_IDLE_REQUEST: u8 = 0x02;
+pub const HID_GET_PROTOCOL_REQUEST: u8 = 0x03;
 pub const HID_SET_IDLE_REQUEST: u8 = 0x0a;
+pub const HID_SET_PROTOCOL_REQUEST: u8 = 0x0b;
 pub const HID_DESCRIPTOR_TYPE: u8 = 0x21;
 pub const HID_REPORT_DESCRIPTOR_TYPE: u8 = 0x22;
 
