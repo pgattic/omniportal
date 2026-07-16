@@ -19,7 +19,6 @@ use crate::{
 
 const REPORT_QUEUE_LEN: usize = 4;
 const STORAGE_POLL_TICKS: u8 = 50;
-
 #[embassy_executor::task]
 pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'static>) {
     static EP_MEMORY: StaticCell<[u32; 1024]> = StaticCell::new();
@@ -149,9 +148,14 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     }
 
     fn handle_command_source(&mut self, source: &str, command: &[u8]) {
-        log_command(source, command);
+        let should_log = should_log_command(command);
+        if should_log {
+            log_command(source, command);
+        }
         if let Some(response) = skylanders::handle_command(&mut self.state, command) {
-            log_response(response.queue_report, &response.report);
+            if should_log || matches!(response.report[0], b'Q' | b'W') {
+                log_response(response.queue_report, &response.report);
+            }
             if response.queue_report {
                 self.push_report(response.report);
             }
@@ -257,6 +261,13 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     fn is_interface_request(&self, req: &Request) -> bool {
         req.index as u8 == u8::from(self.iface)
     }
+}
+
+fn should_log_command(command: &[u8]) -> bool {
+    matches!(
+        command.first().copied().unwrap_or(0),
+        b'Q' | b'W' | b'M' | b'J' | b'L' | b'V' | b'Z'
+    )
 }
 
 fn log_command(source: &str, command: &[u8]) {
@@ -372,11 +383,6 @@ impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
         if req.request_type == RequestType::Class && req.recipient == Recipient::Interface {
             match req.request {
                 skylanders::HID_SET_REPORT_REQUEST => {
-                    println!(
-                        "Skylanders USB SET_REPORT value=0x{:04x}, len={}",
-                        req.value,
-                        xfer.data().len()
-                    );
                     self.handle_command_source("set-report", xfer.data());
                     let _ = xfer.accept();
                 }

@@ -106,9 +106,9 @@ function say(value) {
 async function refreshAll() {
   const status = await api("/status");
   library = await api("/api/library");
-  await loadCatalog();
   renderStatus(status);
   renderLibrary();
+  await loadCatalog();
 }
 
 function renderStatus(status) {
@@ -124,7 +124,7 @@ function renderStatus(status) {
 async function loadCatalog() {
   const kind = $("catalogKind").value;
   const search = $("catalogSearch").value.trim();
-  const loaded = await api(`/api/catalog?kind=${enc(kind)}&q=${enc(search)}&limit=80`);
+  const loaded = await api(`/api/catalog?kind=${enc(kind)}&q=${enc(search)}&limit=30`);
   catalog = loaded.skylanders || [];
   catalogTotal = loaded.total || catalog.length;
   renderCatalog();

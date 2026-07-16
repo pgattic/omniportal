@@ -11,7 +11,7 @@ use embassy_time::{Duration, Timer};
 pub mod routes;
 pub mod ui_html;
 
-pub const HTTP_WORKERS: usize = 4;
+pub const HTTP_WORKERS: usize = 2;
 
 pub fn init() {
     let _ = routes::STATUS_PATH;
@@ -21,7 +21,7 @@ pub fn init() {
 }
 
 #[cfg(target_arch = "xtensa")]
-#[embassy_executor::task(pool_size = 4)]
+#[embassy_executor::task(pool_size = 2)]
 pub async fn run(stack: Stack<'static>) {
     stack.wait_config_up().await;
     println!("HTTP server ready");
@@ -174,8 +174,8 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
 
 #[cfg(target_arch = "xtensa")]
 async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
-    const DEFAULT_LIMIT: usize = 80;
-    const MAX_LIMIT: usize = 100;
+    const DEFAULT_LIMIT: usize = 30;
+    const MAX_LIMIT: usize = 40;
 
     let kind = query_param(query, "kind");
     let search = query_param(query, "q").unwrap_or_default();
