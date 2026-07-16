@@ -150,7 +150,18 @@ pub fn active_entity_image() -> Result<Option<(RecordId, Vec<u8>)>, StorageError
             return Ok(None);
         };
         let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
-        let image = read_entity_image(store, entity)?;
+        let image = match read_entity_image(store, entity) {
+            Ok(image) => image,
+            Err(StorageError::Corrupt) => {
+                #[cfg(target_arch = "xtensa")]
+                println!(
+                    "Storage active entity {} blob corrupt; using generated image",
+                    id.0
+                );
+                generated_entity_image(entity)
+            }
+            Err(error) => return Err(error),
+        };
         Ok(Some((id, image)))
     })
 }
@@ -712,10 +723,14 @@ fn read_entity_image(store: &mut Store, entity: Entity) -> Result<Vec<u8>, Stora
     if let Some(blob_id) = entity.blob_id {
         return read_blob(store, blob_id);
     }
+    Ok(generated_entity_image(entity))
+}
+
+fn generated_entity_image(entity: Entity) -> Vec<u8> {
     let image = initialize_skylanders_placeholder(entity.character_id, entity.variant_id);
     let mut out = Vec::new();
     out.extend_from_slice(&image);
-    Ok(out)
+    out
 }
 
 fn entity_kind_is_mutable(kind: FigureKind) -> bool {
