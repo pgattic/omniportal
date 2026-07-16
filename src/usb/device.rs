@@ -11,9 +11,13 @@ use usb_device::{
     prelude::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
 };
 
-use crate::usb::skylanders;
+use crate::{
+    storage::{self, records::RecordId},
+    usb::skylanders,
+};
 
 const REPORT_QUEUE_LEN: usize = 4;
+const STORAGE_POLL_TICKS: u8 = 50;
 
 #[embassy_executor::task]
 pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'static>) {
@@ -55,6 +59,7 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     queue: [Option<skylanders::Report>; REPORT_QUEUE_LEN],
     out_buf: [u8; skylanders::MAX_PACKET_BYTES],
     idle_rate: u8,
+    storage_poll_ticks: u8,
 }
 
 impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
@@ -73,12 +78,15 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             queue: [None; REPORT_QUEUE_LEN],
             out_buf: [0; skylanders::MAX_PACKET_BYTES],
             idle_rate: 0,
+            storage_poll_ticks: 0,
         }
     }
 
     fn poll(&mut self) {
+        self.poll_active_entity();
         self.poll_out_endpoint();
         self.poll_in_endpoint();
+        self.flush_dirty_entity();
     }
 
     fn poll_out_endpoint(&mut self) {
@@ -116,6 +124,43 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         if let Some(response) = skylanders::handle_command(&mut self.state, command) {
             if response.queue_report {
                 self.push_report(response.report);
+            }
+        }
+    }
+
+    fn poll_active_entity(&mut self) {
+        if self.storage_poll_ticks > 0 {
+            self.storage_poll_ticks -= 1;
+            return;
+        }
+        self.storage_poll_ticks = STORAGE_POLL_TICKS;
+
+        let active_id = storage::active_entity_id().map(|id| id.0);
+        if active_id == self.state.active_entity_id() {
+            return;
+        }
+
+        self.flush_dirty_entity();
+        match storage::active_entity_image() {
+            Ok(Some((id, image))) => {
+                if !self.state.load_entity(id.0, &image) {
+                    self.state.clear_entity();
+                }
+            }
+            Ok(None) | Err(_) => {
+                self.state.clear_entity();
+            }
+        }
+    }
+
+    fn flush_dirty_entity(&mut self) {
+        if !self.state.is_dirty() {
+            return;
+        }
+
+        if let Some(id) = self.state.active_entity_id() {
+            if storage::replace_entity_blob(RecordId(id), self.state.image()).is_ok() {
+                self.state.clear_dirty();
             }
         }
     }

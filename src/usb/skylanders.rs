@@ -89,23 +89,115 @@ pub const HID_REPORT_DESCRIPTOR: &[u8] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PortalState {
     pub active: bool,
-    pub slots: [SlotStatus; MAX_FIGURES],
     pub interrupt_counter: u8,
+    active_entity_id: Option<u32>,
+    slot_status: SlotStatus,
+    queued_status: [Option<SlotStatus>; 4],
+    image: [u8; FIGURE_IMAGE_BYTES],
+    dirty: bool,
 }
 
 impl PortalState {
     pub const fn new() -> Self {
         Self {
             active: true,
-            slots: [SlotStatus::Removed; MAX_FIGURES],
             interrupt_counter: 0,
+            active_entity_id: None,
+            slot_status: SlotStatus::Removed,
+            queued_status: [None; 4],
+            image: [0; FIGURE_IMAGE_BYTES],
+            dirty: false,
         }
     }
 
+    pub fn active_entity_id(&self) -> Option<u32> {
+        self.active_entity_id
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn clear_dirty(&mut self) {
+        self.dirty = false;
+    }
+
+    pub fn image(&self) -> &[u8; FIGURE_IMAGE_BYTES] {
+        &self.image
+    }
+
+    pub fn load_entity(&mut self, entity_id: u32, image: &[u8]) -> bool {
+        if image.len() != FIGURE_IMAGE_BYTES {
+            return false;
+        }
+        if self.active_entity_id == Some(entity_id) {
+            self.image.copy_from_slice(image);
+            return true;
+        }
+
+        self.active_entity_id = Some(entity_id);
+        self.image.copy_from_slice(image);
+        self.slot_status = SlotStatus::Added;
+        self.queued_status = [Some(SlotStatus::Added), Some(SlotStatus::Ready), None, None];
+        self.dirty = false;
+        true
+    }
+
+    pub fn clear_entity(&mut self) {
+        if self.active_entity_id.is_none() && self.slot_status == SlotStatus::Removed {
+            return;
+        }
+        self.active_entity_id = None;
+        self.slot_status = SlotStatus::Removing;
+        self.queued_status = [
+            Some(SlotStatus::Removing),
+            Some(SlotStatus::Removed),
+            None,
+            None,
+        ];
+        self.dirty = false;
+    }
+
     pub fn next_status_report(&mut self) -> Report {
-        let report = status_report(&self.slots, self.interrupt_counter, self.active);
+        let mut slots = [SlotStatus::Removed; MAX_FIGURES];
+        slots[0] = self.next_slot_status();
+        let report = status_report(&slots, self.interrupt_counter, self.active);
         self.interrupt_counter = self.interrupt_counter.wrapping_add(1);
         report
+    }
+
+    pub fn query_block(&self, slot: u8, block: u8) -> Report {
+        if slot != 0 || block >= FIGURE_BLOCK_COUNT || self.slot_status != SlotStatus::Ready {
+            return query_error_response(block);
+        }
+
+        let mut data = [0; FIGURE_BLOCK_BYTES];
+        let offset = block as usize * FIGURE_BLOCK_BYTES;
+        data.copy_from_slice(&self.image[offset..offset + FIGURE_BLOCK_BYTES]);
+        query_response(slot, block, &data)
+    }
+
+    pub fn write_block(&mut self, slot: u8, block: u8, data: &[u8]) -> Report {
+        if slot != 0
+            || block >= FIGURE_BLOCK_COUNT
+            || !self.slot_status.is_present()
+            || data.len() < FIGURE_BLOCK_BYTES
+        {
+            return write_response(0xff, block, false);
+        }
+
+        let offset = block as usize * FIGURE_BLOCK_BYTES;
+        self.image[offset..offset + FIGURE_BLOCK_BYTES]
+            .copy_from_slice(&data[..FIGURE_BLOCK_BYTES]);
+        self.dirty = true;
+        write_response(slot, block, true)
+    }
+
+    fn next_slot_status(&mut self) -> SlotStatus {
+        if let Some(status) = pop_status(&mut self.queued_status) {
+            self.slot_status = status;
+        }
+        self.slot_status
     }
 }
 
@@ -216,16 +308,22 @@ pub fn handle_command(state: &mut PortalState, command: &[u8]) -> Option<Command
             queue_report: false,
         }),
         b'Q' => {
+            let slot = command_slot(command.get(1).copied().unwrap_or(0xff));
             let block = command.get(2).copied().unwrap_or(0);
             Some(CommandResponse {
-                report: query_error_response(block),
+                report: slot
+                    .map(|slot| state.query_block(slot, block))
+                    .unwrap_or_else(|| query_error_response(block)),
                 queue_report: true,
             })
         }
         b'W' => {
+            let slot = command_slot(command.get(1).copied().unwrap_or(0xff));
             let block = command.get(2).copied().unwrap_or(0);
             Some(CommandResponse {
-                report: write_response(0xff, block, false),
+                report: slot
+                    .map(|slot| state.write_block(slot, block, command.get(3..).unwrap_or(&[])))
+                    .unwrap_or_else(|| write_response(0xff, block, false)),
                 queue_report: true,
             })
         }
@@ -243,6 +341,23 @@ pub fn handle_command(state: &mut PortalState, command: &[u8]) -> Option<Command
         }),
         _ => None,
     }
+}
+
+fn command_slot(slot_id: u8) -> Option<u8> {
+    if (FIRST_FIGURE_SLOT_ID..FIRST_FIGURE_SLOT_ID + MAX_FIGURES as u8).contains(&slot_id) {
+        Some(slot_id & 0x0f)
+    } else {
+        None
+    }
+}
+
+fn pop_status(queue: &mut [Option<SlotStatus>; 4]) -> Option<SlotStatus> {
+    let status = queue[0]?;
+    for index in 1..queue.len() {
+        queue[index - 1] = queue[index];
+    }
+    queue[queue.len() - 1] = None;
+    Some(status)
 }
 
 fn ack_response(op: u8) -> Report {
@@ -312,14 +427,16 @@ mod tests {
     #[test]
     fn command_handler_returns_status_reports() {
         let mut state = PortalState::new();
-        state.slots[0] = SlotStatus::Ready;
+        let image = [0; FIGURE_IMAGE_BYTES];
+        assert!(state.load_entity(1, &image));
 
         let first = handle_command(&mut state, &[b'S']).unwrap().report;
         let second = handle_command(&mut state, &[b'S']).unwrap().report;
 
         assert_eq!(first[0], b'S');
-        assert_eq!(&first[1..5], &0x01u32.to_le_bytes());
+        assert_eq!(&first[1..5], &0x03u32.to_le_bytes());
         assert_eq!(first[5], 0);
+        assert_eq!(&second[1..5], &0x01u32.to_le_bytes());
         assert_eq!(second[5], 1);
     }
 
@@ -345,5 +462,33 @@ mod tests {
 
         assert_eq!(&query.report[..3], &[b'Q', 0x01, 0x02]);
         assert_eq!(&write.report[..3], &[b'W', 0x01, 0x03]);
+    }
+
+    #[test]
+    fn loaded_entity_supports_block_reads_and_writes() {
+        let mut state = PortalState::new();
+        let mut image = [0; FIGURE_IMAGE_BYTES];
+        for (index, byte) in image.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+        assert!(state.load_entity(42, &image));
+        let _ = state.next_status_report();
+        let _ = state.next_status_report();
+
+        let query = handle_command(&mut state, &[b'Q', 0x10, 0x02]).unwrap();
+        assert_eq!(&query.report[..3], &[b'Q', 0x10, 0x02]);
+        assert_eq!(&query.report[3..19], &image[32..48]);
+
+        let write_data = [0xa5; FIGURE_BLOCK_BYTES];
+        let mut write_command = [0; 19];
+        write_command[0] = b'W';
+        write_command[1] = 0x10;
+        write_command[2] = 0x02;
+        write_command[3..].copy_from_slice(&write_data);
+
+        let write = handle_command(&mut state, &write_command).unwrap();
+        assert_eq!(&write.report[..3], &[b'W', 0x10, 0x02]);
+        assert!(state.is_dirty());
+        assert_eq!(&state.image()[32..48], &write_data);
     }
 }

@@ -140,6 +140,21 @@ pub fn active_entity_json() -> String {
         .unwrap_or_else(|| String::from("null"))
 }
 
+pub fn active_entity_id() -> Option<RecordId> {
+    with_store(|store| store.catalog.active_entity_id).flatten()
+}
+
+pub fn active_entity_image() -> Result<Option<(RecordId, Vec<u8>)>, StorageError> {
+    with_store_mut(|store| {
+        let Some(id) = store.catalog.active_entity_id else {
+            return Ok(None);
+        };
+        let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
+        let image = read_entity_image(store, entity)?;
+        Ok(Some((id, image)))
+    })
+}
+
 pub fn create_identity_from_query(query: &str) -> Result<String, StorageError> {
     let name = query_param(query, "name").ok_or(StorageError::BadRequest)?;
     let character_id = query_param(query, "character_id")
@@ -468,6 +483,23 @@ pub fn read_entity_blob(entity_id: RecordId) -> Result<Vec<u8>, StorageError> {
             .entity(entity_id)
             .ok_or(StorageError::NotFound)?;
         read_entity_image(store, entity)
+    })
+}
+
+pub fn replace_entity_blob(entity_id: RecordId, image: &[u8]) -> Result<(), StorageError> {
+    with_store_mut(|store| {
+        let mut entity = store
+            .catalog
+            .entity(entity_id)
+            .ok_or(StorageError::NotFound)?;
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
+        entity.blob_id = Some(blob_id);
+        entity.data_mode = EntityDataMode::MutableImage;
+        entity.image_len = image.len() as u32;
+        entity.image_crc32 = crc32(image);
+        entity.updated_generation = store.catalog.next_generation();
+        append_entity_record(store, entity)?;
+        Ok(())
     })
 }
 
