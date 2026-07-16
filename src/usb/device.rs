@@ -66,6 +66,7 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     idle_rate: u8,
     protocol: u8,
     storage_poll_ticks: u8,
+    active_selection_marker: Option<(u32, u32)>,
 }
 
 impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
@@ -94,6 +95,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             idle_rate: 0,
             protocol: 1,
             storage_poll_ticks: 0,
+            active_selection_marker: None,
         }
     }
 
@@ -176,8 +178,9 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         }
         self.storage_poll_ticks = STORAGE_POLL_TICKS;
 
-        let active_id = storage::active_entity_id().map(|id| id.0);
-        if active_id == self.state.active_entity_id() {
+        let active_marker =
+            storage::active_entity_marker().map(|(id, generation)| (id.0, generation));
+        if active_marker == self.active_selection_marker {
             return;
         }
 
@@ -185,6 +188,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         match storage::active_entity_image() {
             Ok(Some((id, image))) => {
                 if self.state.load_entity(id.0, &image) {
+                    self.active_selection_marker = active_marker;
                     println!(
                         "Skylanders USB loaded active entity {} ({} bytes)",
                         id.0,
@@ -197,15 +201,18 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                         image.len()
                     );
                     self.state.clear_entity();
+                    self.active_selection_marker = None;
                 }
             }
             Ok(None) => {
                 println!("Skylanders USB active entity cleared");
                 self.state.clear_entity();
+                self.active_selection_marker = active_marker;
             }
             Err(error) => {
                 println!("Skylanders USB failed to read active entity: {:?}", error);
                 self.state.clear_entity();
+                self.active_selection_marker = None;
             }
         }
     }

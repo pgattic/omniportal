@@ -144,6 +144,16 @@ pub fn active_entity_id() -> Option<RecordId> {
     with_store(|store| store.catalog.active_entity_id).flatten()
 }
 
+pub fn active_entity_marker() -> Option<(RecordId, u32)> {
+    with_store(|store| {
+        store
+            .catalog
+            .active_entity_id
+            .map(|id| (id, store.catalog.active_config_generation))
+    })
+    .flatten()
+}
+
 pub fn active_entity_image() -> Result<Option<(RecordId, Vec<u8>)>, StorageError> {
     with_store_mut(|store| {
         let Some(id) = store.catalog.active_entity_id else {
@@ -527,6 +537,7 @@ pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
         let generation = store.catalog.next_generation();
         append_config_record(&mut store.flash, &mut store.catalog, Some(id), generation)?;
         store.catalog.active_entity_id = Some(id);
+        store.catalog.active_config_generation = generation;
         Ok(format!("{{\"active_entity_id\":{}}}\n", id.0))
     })
 }
@@ -536,6 +547,7 @@ pub fn clear_active_entity() -> Result<String, StorageError> {
         let generation = store.catalog.next_generation();
         append_config_record(&mut store.flash, &mut store.catalog, None, generation)?;
         store.catalog.active_entity_id = None;
+        store.catalog.active_config_generation = generation;
         Ok(String::from("{\"active_entity_id\":null}\n"))
     })
 }
@@ -562,6 +574,7 @@ pub fn compact_storage() -> Result<String, StorageError> {
         let identities = store.catalog.identities;
         let entities = store.catalog.entities;
         let active_entity_id = store.catalog.active_entity_id;
+        let active_config_generation = store.catalog.active_config_generation;
         let next_record_id = store.catalog.next_record_id;
         let next_blob_id = store.catalog.next_blob_id;
         let mut generation = store.catalog.next_generation;
@@ -647,7 +660,10 @@ pub fn compact_storage() -> Result<String, StorageError> {
                 generation,
             )?;
             store.catalog.active_entity_id = Some(active);
+            store.catalog.active_config_generation = generation;
             generation += 1;
+        } else {
+            store.catalog.active_config_generation = active_config_generation;
         }
 
         store.catalog.next_generation = generation;
@@ -801,6 +817,7 @@ struct Catalog {
     entities: [Option<Entity>; MAX_ENTITIES],
     blobs: [Option<StoredBlob>; MAX_ENTITIES],
     active_entity_id: Option<RecordId>,
+    active_config_generation: u32,
     write_offset: u32,
     next_record_id: u32,
     next_blob_id: u32,
@@ -815,6 +832,7 @@ impl Catalog {
             entities: [None; MAX_ENTITIES],
             blobs: [None; MAX_ENTITIES],
             active_entity_id: None,
+            active_config_generation: 0,
             write_offset: 0,
             next_record_id: 1,
             next_blob_id: 1,
@@ -1096,6 +1114,7 @@ fn apply_record(
         RECORD_KIND_CONFIG_UPSERT => {
             catalog.next_generation = catalog.next_generation.max(record.generation + 1);
             catalog.active_entity_id = decode_config(payload);
+            catalog.active_config_generation = record.generation;
         }
         _ => {}
     }

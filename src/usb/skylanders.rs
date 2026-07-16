@@ -132,15 +132,21 @@ impl PortalState {
         if image.len() != FIGURE_IMAGE_BYTES {
             return false;
         }
-        if self.active_entity_id == Some(entity_id) {
-            self.image.copy_from_slice(image);
-            return true;
-        }
 
+        let was_present = self.active_entity_id.is_some() && self.slot_status.is_present();
         self.active_entity_id = Some(entity_id);
         self.image.copy_from_slice(image);
         self.slot_status = SlotStatus::Added;
-        self.queued_status = [Some(SlotStatus::Added), Some(SlotStatus::Ready), None, None];
+        self.queued_status = if was_present {
+            [
+                Some(SlotStatus::Removing),
+                Some(SlotStatus::Removed),
+                Some(SlotStatus::Added),
+                Some(SlotStatus::Ready),
+            ]
+        } else {
+            [Some(SlotStatus::Added), Some(SlotStatus::Ready), None, None]
+        };
         self.dirty = false;
         true
     }
@@ -492,5 +498,21 @@ mod tests {
         assert_eq!(&write.report[..3], &[b'W', 0x10, 0x02]);
         assert!(state.is_dirty());
         assert_eq!(&state.image()[32..48], &write_data);
+    }
+
+    #[test]
+    fn replacing_loaded_entity_replays_physical_placement_cycle() {
+        let mut state = PortalState::new();
+        let image = [0; FIGURE_IMAGE_BYTES];
+        assert!(state.load_entity(1, &image));
+        assert_eq!(state.next_status_report()[1], SlotStatus::Added as u8);
+        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+
+        assert!(state.load_entity(1, &image));
+
+        assert_eq!(state.next_status_report()[1], SlotStatus::Removing as u8);
+        assert_eq!(state.next_status_report()[1], SlotStatus::Removed as u8);
+        assert_eq!(state.next_status_report()[1], SlotStatus::Added as u8);
+        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
     }
 }
