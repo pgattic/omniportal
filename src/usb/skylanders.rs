@@ -96,7 +96,7 @@ pub struct PortalState {
 impl PortalState {
     pub const fn new() -> Self {
         Self {
-            active: false,
+            active: true,
             slots: [SlotStatus::Removed; MAX_FIGURES],
             interrupt_counter: 0,
         }
@@ -213,41 +213,35 @@ pub fn handle_command(state: &mut PortalState, command: &[u8]) -> Option<Command
         }),
         b'S' => Some(CommandResponse {
             report: state.next_status_report(),
-            queue_report: true,
+            queue_report: false,
         }),
         b'Q' => {
-            let slot = command_slot(command.get(1).copied().unwrap_or(0xff));
             let block = command.get(2).copied().unwrap_or(0);
             Some(CommandResponse {
-                report: query_error_response(block).map_slot(slot),
+                report: query_error_response(block),
                 queue_report: true,
             })
         }
         b'W' => {
-            let slot = command_slot(command.get(1).copied().unwrap_or(0xff));
             let block = command.get(2).copied().unwrap_or(0);
             Some(CommandResponse {
-                report: write_response(slot.unwrap_or(0xff), block, false),
+                report: write_response(0xff, block, false),
                 queue_report: true,
             })
         }
         b'M' => Some(CommandResponse {
-            report: audio_firmware_response(0x00, 0x19),
+            report: audio_firmware_response(command.get(1).copied().unwrap_or(0), 0x19),
             queue_report: true,
         }),
-        b'C' | b'J' | b'L' | b'V' | b'Z' => Some(CommandResponse {
+        b'J' => Some(CommandResponse {
             report: ack_response(op),
-            queue_report: op == b'V' || op == b'Z',
+            queue_report: true,
+        }),
+        b'C' | b'L' | b'V' | b'Z' => Some(CommandResponse {
+            report: ack_response(op),
+            queue_report: false,
         }),
         _ => None,
-    }
-}
-
-fn command_slot(slot_id: u8) -> Option<u8> {
-    if (FIRST_FIGURE_SLOT_ID..FIRST_FIGURE_SLOT_ID + MAX_FIGURES as u8).contains(&slot_id) {
-        Some(slot_id & 0x0f)
-    } else {
-        None
     }
 }
 
@@ -255,19 +249,6 @@ fn ack_response(op: u8) -> Report {
     let mut report = [0; REPORT_BYTES];
     report[0] = op;
     report
-}
-
-trait QueryErrorSlot {
-    fn map_slot(self, slot: Option<u8>) -> Self;
-}
-
-impl QueryErrorSlot for Report {
-    fn map_slot(mut self, slot: Option<u8>) -> Self {
-        if let Some(slot) = slot {
-            self[1] = figure_slot_id(slot).unwrap_or(0x01);
-        }
-        self
-    }
 }
 
 #[cfg(test)]
@@ -351,6 +332,18 @@ mod tests {
             &[b'M', 0x00, 0x00, 0x19]
         );
         assert!(!handle_command(&mut state, &[b'C']).unwrap().queue_report);
-        assert_eq!(handle_command(&mut state, &[b'V']).unwrap().report[0], b'V');
+        assert!(!handle_command(&mut state, &[b'V']).unwrap().queue_report);
+        assert!(handle_command(&mut state, &[b'J']).unwrap().queue_report);
+    }
+
+    #[test]
+    fn command_handler_stubs_figure_io_as_no_figure_error() {
+        let mut state = PortalState::new();
+
+        let query = handle_command(&mut state, &[b'Q', 0x10, 0x02]).unwrap();
+        let write = handle_command(&mut state, &[b'W', 0x10, 0x03]).unwrap();
+
+        assert_eq!(&query.report[..3], &[b'Q', 0x01, 0x02]);
+        assert_eq!(&write.report[..3], &[b'W', 0x01, 0x03]);
     }
 }

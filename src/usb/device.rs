@@ -7,6 +7,7 @@ use static_cell::StaticCell;
 use usb_device::{
     class_prelude::*,
     control::{Recipient, Request, RequestType},
+    device::UsbRev,
     prelude::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
 };
 
@@ -32,6 +33,7 @@ pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'s
         .device_sub_class(0x00)
         .device_protocol(0x00)
         .device_release(skylanders::BCD_DEVICE)
+        .usb_rev(UsbRev::Usb200)
         .max_power(skylanders::CONFIG_MAX_POWER_MA as usize)
         .unwrap()
         .build();

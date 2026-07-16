@@ -149,9 +149,11 @@ Definition of done: PC recognizes the ESP32-S3 as a generic HID device while the
 
 ### Phase D — Skylanders Protocol Implementation
 
-- [ ] Implement the exact device descriptor: VID `0x1430`, PID `0x0150`, HID device, single interrupt-IN endpoint for status, control-transfer-based command channel (bmRequestType `0x21`, bRequest `0x09`) for commands, both 32 bytes, zero-padded.
-- [ ] Implement the status packet the portal continuously sends (`S` — figure-arrived events with slot IDs 10/11/... etc).
+- [x] Implement the Skylanders device descriptor from Dolphin: VID `0x1430`, PID `0x0150`, HID interface, interrupt endpoints, and control-transfer-based command channel (bmRequestType `0x21`, bRequest `0x09`) for commands.
+- [x] Implement the status packet the portal continuously sends (`S` — figure-arrived events with slot IDs 10/11/... etc).
 - [ ] Implement command handling: `R` (activate/read), `A` (query), `Q` (read block), `W` (write block), `C` (LED color, can be ignored or just acked), `Z`.
+  - [x] Initial command scaffold for `A`, `R`, `S`, `M`, `C`, `J`, `L`, `V`, `Z`, and no-figure `Q`/`W` responses.
+  - [ ] Back `Q`/`W` with the selected entity image and durable save writes.
 - [ ] Wire this up to the selected mutable entity: when the web UI marks an entity active, the USB task should emit the appropriate status packet as if that figure were just placed on the portal, answer `Q` block-reads from that entity's stored binary data, and apply `W` block-writes back to that entity.
 - [ ] Buffer writes in RAM during active gameplay and commit them to flash on a debounce/timer, on figure removal, and before mode changes to reduce flash wear.
 - [ ] Implement Skylanders fresh-image generation from character ID + variant ID + optional NUID:
