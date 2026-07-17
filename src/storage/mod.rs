@@ -89,6 +89,7 @@ pub fn init() {
     if scan.is_err() {
         catalog.needs_format = true;
     }
+    catalog.clear_transient_active_slots();
     #[cfg(not(target_arch = "xtensa"))]
     let _ = scan;
     #[cfg(target_arch = "xtensa")]
@@ -557,13 +558,6 @@ pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
         }
         let generation = store.catalog.next_generation();
         store.catalog.place_entity_in_slot(id, slot as usize);
-        let active_slots = store.catalog.active_slots;
-        append_config_record(
-            &mut store.flash,
-            &mut store.catalog,
-            active_slots,
-            generation,
-        )?;
         store.catalog.active_config_generation = generation;
         Ok(format!(
             "{{\"active_entity_id\":{},\"slot\":{},\"active_slots\":{}}}\n",
@@ -591,13 +585,6 @@ pub fn clear_active_entity_from_params(params: &str) -> Result<String, StorageEr
         } else {
             store.catalog.active_slots = [None; MAX_FIGURES];
         }
-        let active_slots = store.catalog.active_slots;
-        append_config_record(
-            &mut store.flash,
-            &mut store.catalog,
-            active_slots,
-            generation,
-        )?;
         store.catalog.active_config_generation = generation;
         Ok(format!(
             "{{\"active_entity_id\":{},\"active_slots\":{}}}\n",
@@ -628,8 +615,6 @@ pub fn compact_storage() -> Result<String, StorageError> {
 
         let identities = store.catalog.identities;
         let entities = store.catalog.entities;
-        let active_slots = store.catalog.active_slots;
-        let active_config_generation = store.catalog.active_config_generation;
         let next_record_id = store.catalog.next_record_id;
         let next_blob_id = store.catalog.next_blob_id;
         let mut generation = store.catalog.next_generation;
@@ -707,19 +692,7 @@ pub fn compact_storage() -> Result<String, StorageError> {
             generation += 1;
         }
 
-        if active_slots.iter().any(Option::is_some) {
-            append_config_record(
-                &mut store.flash,
-                &mut store.catalog,
-                active_slots,
-                generation,
-            )?;
-            store.catalog.active_slots = active_slots;
-            store.catalog.active_config_generation = generation;
-            generation += 1;
-        } else {
-            store.catalog.active_config_generation = active_config_generation;
-        }
+        store.catalog.active_config_generation = generation;
 
         store.catalog.next_generation = generation;
         Ok(format!(
@@ -1023,6 +996,10 @@ impl Catalog {
         }
     }
 
+    fn clear_transient_active_slots(&mut self) {
+        self.active_slots = [None; MAX_FIGURES];
+    }
+
     fn identity_count(&self) -> usize {
         self.identities.iter().filter(|item| item.is_some()).count()
     }
@@ -1298,6 +1275,7 @@ fn append_entity_record(store: &mut Store, entity: Entity) -> Result<(), Storage
     store.catalog.upsert_entity(entity)
 }
 
+#[cfg(test)]
 fn append_config_record(
     flash: &mut StorageFlash,
     catalog: &mut Catalog,
@@ -1545,6 +1523,7 @@ fn decode_entity(id: u32, _generation: u32, payload: &[u8]) -> Option<Entity> {
     })
 }
 
+#[cfg(test)]
 fn encode_config(active_slots: [Option<RecordId>; MAX_FIGURES]) -> [u8; 4 + MAX_FIGURES * 4] {
     let mut out = [0; 4 + MAX_FIGURES * 4];
     out[0..4].copy_from_slice(CONFIG_SLOTS_MAGIC);
