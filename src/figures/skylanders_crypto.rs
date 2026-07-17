@@ -69,7 +69,7 @@ pub fn checksum_type2(data_start: &[u8]) -> Option<u16> {
 pub fn checksum_type3(data_start: &[u8]) -> Option<u16> {
     let mut input = [0; 0x110];
     input[..0x20].copy_from_slice(data_start.get(..0x20)?);
-    input[0x20..0x110].copy_from_slice(data_start.get(0x30..0x120)?);
+    input[0x20..0x30].copy_from_slice(data_start.get(0x30..0x40)?);
     Some(crc16_ccitt_false(&input))
 }
 
@@ -605,7 +605,7 @@ mod tests {
         assert_eq!(checksum_type0(&data), Some(0x3554));
         assert_eq!(checksum_type1(&data), Some(0x1622));
         assert_eq!(checksum_type2(&data), Some(0x543e));
-        assert_eq!(checksum_type3(&data), Some(0xed5f));
+        assert_eq!(checksum_type3(&data), Some(0xbe5a));
         assert_eq!(checksum_type6(&data), Some(0xbcb6));
     }
 

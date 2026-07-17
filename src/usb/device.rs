@@ -184,8 +184,6 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         if active_marker == self.active_selection_marker {
             return;
         }
-        let slot_map_changed = active_marker.0 != self.active_selection_marker.0;
-
         self.flush_dirty_entity(true);
         match storage::active_slot_images() {
             Ok(images) => {
@@ -199,7 +197,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
 
                 let mut loaded = 0;
                 for (slot, id, image) in images {
-                    if slot_map_changed && self.state.slot_entity_id(slot) == Some(id.0) {
+                    if self.state.slot_entity_id(slot) == Some(id.0) {
                         continue;
                     }
                     if self.state.load_entity_into_slot(slot, id.0, &image) {
