@@ -18,7 +18,7 @@ use crate::{
     usb::skylanders,
 };
 
-const REPORT_QUEUE_LEN: usize = 4;
+const REPORT_QUEUE_LEN: usize = 32;
 const STORAGE_POLL_TICKS: u8 = 50;
 const STORAGE_WRITE_DEBOUNCE: Duration =
     Duration::from_millis(crate::storage::wear::DEFAULT_COMMIT_DEBOUNCE_MS as u64);

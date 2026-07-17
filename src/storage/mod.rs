@@ -3,7 +3,7 @@ use core::cell::RefCell;
 use crate::config;
 use crate::figures::catalog::skylanders_catalog_entry;
 use crate::figures::formats::ImageFormat;
-use crate::figures::init::initialize_skylanders_placeholder;
+use crate::figures::init::{initialize_skylanders_entity_image, rekey_skylanders_entity_image};
 use crate::figures::{FigureKind, GameLine};
 #[cfg(target_arch = "xtensa")]
 use crate::platform::println;
@@ -243,11 +243,15 @@ pub fn create_entity_from_query(query: &str) -> Result<String, StorageError> {
             .catalog
             .identity(RecordId(identity_id))
             .ok_or(StorageError::NotFound)?;
-        let image = initialize_skylanders_placeholder(identity.character_id, identity.variant_id);
+        let entity_id = store.catalog.next_record_id();
+        let image = initialize_skylanders_entity_image(
+            identity.character_id,
+            identity.variant_id,
+            entity_id.0,
+        );
         let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image)?;
 
         let image_crc32 = crc32(&image);
-        let entity_id = store.catalog.next_record_id();
         let entity_generation = store.catalog.next_generation();
         let entity = Entity {
             id: entity_id,
@@ -294,7 +298,8 @@ pub fn create_entity_from_catalog_params(params: &str) -> Result<String, Storage
         } else {
             None
         };
-        let image = initialize_skylanders_placeholder(entry.character_id, variant_id);
+        let entity_id = store.catalog.next_record_id();
+        let image = initialize_skylanders_entity_image(entry.character_id, variant_id, entity_id.0);
         let (data_mode, blob_id, image_len, image_crc32) = if entity_kind_is_mutable(entry.kind) {
             let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image)?;
             (
@@ -311,7 +316,6 @@ pub fn create_entity_from_catalog_params(params: &str) -> Result<String, Storage
                 crc32(&image),
             )
         };
-        let entity_id = store.catalog.next_record_id();
         let generation = store.catalog.next_generation();
         let entity = Entity {
             id: entity_id,
@@ -404,9 +408,13 @@ pub fn clone_entity_from_params(params: &str) -> Result<String, StorageError> {
             .catalog
             .entity(RecordId(source_id))
             .ok_or(StorageError::NotFound)?;
-        let image = read_entity_image(store, source)?;
-        let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image)?;
         let id = store.catalog.next_record_id();
+        let mut image = read_entity_image(store, source)?;
+        if source.image_format == ImageFormat::SkylandersMifare1k {
+            rekey_skylanders_entity_image(&mut image, source.character_id, source.variant_id, id.0);
+        }
+        let image_crc32 = crc32(&image);
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image)?;
         let generation = store.catalog.next_generation();
         let clone = Entity {
             id,
@@ -420,8 +428,8 @@ pub fn clone_entity_from_params(params: &str) -> Result<String, StorageError> {
             variant_id: source.variant_id,
             blob_id: Some(blob_id),
             image_format: source.image_format,
-            image_len: source.image_len,
-            image_crc32: source.image_crc32,
+            image_len: image.len() as u32,
+            image_crc32,
             created_generation: generation,
             updated_generation: generation,
         };
@@ -783,17 +791,27 @@ fn read_blob(store: &mut Store, blob_id: BlobId) -> Result<Vec<u8>, StorageError
 }
 
 fn read_entity_image(store: &mut Store, entity: Entity) -> Result<Vec<u8>, StorageError> {
-    if let Some(blob_id) = entity.blob_id {
-        return read_blob(store, blob_id);
-    }
-    Ok(generated_entity_image(entity))
+    let mut image = if let Some(blob_id) = entity.blob_id {
+        read_blob(store, blob_id)?
+    } else {
+        generated_entity_image(entity)
+    };
+    rekey_legacy_generated_uid(&mut image, entity);
+    Ok(image)
 }
 
 fn generated_entity_image(entity: Entity) -> Vec<u8> {
-    let image = initialize_skylanders_placeholder(entity.character_id, entity.variant_id);
+    let image =
+        initialize_skylanders_entity_image(entity.character_id, entity.variant_id, entity.id.0);
     let mut out = Vec::new();
     out.extend_from_slice(&image);
     out
+}
+
+fn rekey_legacy_generated_uid(image: &mut [u8], entity: Entity) {
+    if entity.image_format == ImageFormat::SkylandersMifare1k && image.get(0..4) == Some(b"OMNI") {
+        rekey_skylanders_entity_image(image, entity.character_id, entity.variant_id, entity.id.0);
+    }
 }
 
 fn entity_kind_is_mutable(kind: FigureKind) -> bool {

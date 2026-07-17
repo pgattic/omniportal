@@ -6,8 +6,57 @@ pub fn initialize_skylanders_placeholder(
     character_id: u32,
     variant_id: Option<u32>,
 ) -> [u8; SKYLANDERS_IMAGE_BYTES] {
+    initialize_skylanders_placeholder_with_uid(character_id, variant_id, *b"OMNI")
+}
+
+pub fn initialize_skylanders_entity_image(
+    character_id: u32,
+    variant_id: Option<u32>,
+    entity_id: u32,
+) -> [u8; SKYLANDERS_IMAGE_BYTES] {
+    initialize_skylanders_placeholder_with_uid(
+        character_id,
+        variant_id,
+        generated_uid(character_id, variant_id, entity_id),
+    )
+}
+
+pub fn rekey_skylanders_entity_image(
+    image: &mut [u8],
+    character_id: u32,
+    variant_id: Option<u32>,
+    entity_id: u32,
+) -> bool {
+    if image.len() != SKYLANDERS_IMAGE_BYTES {
+        return false;
+    }
+
+    let uid = generated_uid(character_id, variant_id, entity_id);
+    image[0..4].copy_from_slice(&uid);
+    image[4] = image[0] ^ image[1] ^ image[2] ^ image[3];
+
+    let crc = crc16(&image[..0x1e]);
+    image[0x1e..0x20].copy_from_slice(&crc.to_le_bytes());
+
+    let nuid = [image[0], image[1], image[2], image[3]];
+    for sector in 0..0x10 {
+        let key = calculate_key_a(sector as u8, nuid);
+        let offset = sector * 0x40 + 0x30;
+        for index in 0..6 {
+            image[offset + index] = (key >> ((5 - index) * 8)) as u8;
+        }
+    }
+
+    true
+}
+
+pub fn initialize_skylanders_placeholder_with_uid(
+    character_id: u32,
+    variant_id: Option<u32>,
+    uid: [u8; 4],
+) -> [u8; SKYLANDERS_IMAGE_BYTES] {
     let mut image = [0; SKYLANDERS_IMAGE_BYTES];
-    image[0..4].copy_from_slice(b"OMNI");
+    image[0..4].copy_from_slice(&uid);
     image[4] = image[0] ^ image[1] ^ image[2] ^ image[3];
     image[5] = 0x81;
     image[6] = 0x01;
@@ -20,6 +69,17 @@ pub fn initialize_skylanders_placeholder(
     compute_checksum_type0(&mut image);
     populate_keys(&mut image);
     image
+}
+
+fn generated_uid(character_id: u32, variant_id: Option<u32>, entity_id: u32) -> [u8; 4] {
+    let variant = variant_id.unwrap_or(0);
+    let mut seed = 0x4f4d_4e49u32;
+    seed ^= entity_id.wrapping_mul(0x9e37_79b1);
+    seed ^= character_id.rotate_left(7);
+    seed ^= variant.rotate_left(19);
+    let mut uid = seed.to_le_bytes();
+    uid[0] = (uid[0] & 0xfe) | 0x04;
+    uid
 }
 
 fn populate_sector_trailers(image: &mut [u8; SKYLANDERS_IMAGE_BYTES]) {
@@ -102,5 +162,32 @@ mod tests {
         assert_eq!(&image[0x1e..0x20], &crc16(&image[..0x1e]).to_le_bytes());
         assert_eq!(&image[0x36..0x3a], &0x690f_0f0fu32.to_le_bytes());
         assert_eq!(&image[0x76..0x7a], &0x6908_0f7fu32.to_le_bytes());
+    }
+
+    #[test]
+    fn generated_entity_images_have_stable_distinct_uids() {
+        let first = initialize_skylanders_entity_image(21, None, 1);
+        let second = initialize_skylanders_entity_image(21, None, 2);
+        let first_again = initialize_skylanders_entity_image(21, None, 1);
+
+        assert_eq!(&first[0..4], &first_again[0..4]);
+        assert_ne!(&first[0..4], &second[0..4]);
+        assert_eq!(first[4], first[0] ^ first[1] ^ first[2] ^ first[3]);
+        assert_eq!(&first[0x1e..0x20], &crc16(&first[..0x1e]).to_le_bytes());
+        assert_ne!(&first[0x70..0x76], &second[0x70..0x76]);
+    }
+
+    #[test]
+    fn rekey_updates_uid_checksum_and_sector_keys() {
+        let mut image = initialize_skylanders_entity_image(21, None, 1);
+        let old_uid = image[0..4].to_vec();
+        let old_key = image[0x70..0x76].to_vec();
+
+        assert!(rekey_skylanders_entity_image(&mut image, 21, None, 2));
+
+        assert_ne!(&image[0..4], old_uid.as_slice());
+        assert_ne!(&image[0x70..0x76], old_key.as_slice());
+        assert_eq!(image[4], image[0] ^ image[1] ^ image[2] ^ image[3]);
+        assert_eq!(&image[0x1e..0x20], &crc16(&image[..0x1e]).to_le_bytes());
     }
 }
