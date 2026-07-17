@@ -548,7 +548,7 @@ pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
             return Err(StorageError::NotFound);
         }
         let generation = store.catalog.next_generation();
-        store.catalog.active_slots[slot as usize] = Some(id);
+        store.catalog.place_entity_in_slot(id, slot as usize);
         let active_slots = store.catalog.active_slots;
         append_config_record(
             &mut store.flash,
@@ -992,6 +992,17 @@ impl Catalog {
         }
         out.push(']');
         out
+    }
+
+    fn place_entity_in_slot(&mut self, id: RecordId, slot: usize) {
+        for active_slot in &mut self.active_slots {
+            if *active_slot == Some(id) {
+                *active_slot = None;
+            }
+        }
+        if let Some(active_slot) = self.active_slots.get_mut(slot) {
+            *active_slot = Some(id);
+        }
     }
 
     fn identity_count(&self) -> usize {
@@ -1790,6 +1801,18 @@ mod tests {
         assert_eq!(decoded[0], Some(RecordId(8)));
         assert_eq!(decoded[3], Some(RecordId(11)));
         assert_eq!(decoded[4], None);
+    }
+
+    #[test]
+    fn selecting_entity_moves_it_between_slots() {
+        let mut catalog = Catalog::new();
+        catalog.place_entity_in_slot(RecordId(1), 0);
+        catalog.place_entity_in_slot(RecordId(2), 1);
+        catalog.place_entity_in_slot(RecordId(1), 2);
+
+        assert_eq!(catalog.active_slots[0], None);
+        assert_eq!(catalog.active_slots[1], Some(RecordId(2)));
+        assert_eq!(catalog.active_slots[2], Some(RecordId(1)));
     }
 
     #[test]

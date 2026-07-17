@@ -33,7 +33,7 @@ pub const FIGURE_BLOCK_BYTES: usize = 16;
 pub const FIGURE_BLOCK_COUNT: u8 = 64;
 pub const FIGURE_IMAGE_BYTES: usize = FIGURE_BLOCK_BYTES * FIGURE_BLOCK_COUNT as usize;
 pub const FIRST_FIGURE_SLOT_ID: u8 = 0x10;
-const STATUS_REPORTS_PER_QUEUED_STATE: u8 = 8;
+const STATUS_REPORTS_PER_QUEUED_STATE: u8 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
