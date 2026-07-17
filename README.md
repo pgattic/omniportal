@@ -88,15 +88,16 @@ After connecting, the root page should show `Hello from ESP32-S3`, and
 
 ## Storage Smoke Test
 
-The firmware reserves the final 256 KiB of the 16 MiB flash chip for the
+The firmware currently reuses the default ESP-IDF `nvs` data partition for the
 OmniPortal append-only journal:
 
-* offset: `0x00fc0000`
-* size: `0x00040000`
+* offset: `0x00009000`
+* size: `0x00006000`
 
-This is a Phase B bootstrap layout based on the current boot log's factory app
-partition ending at `0x00fb0000`. Before the firmware grows large, replace this
-with an explicit partition-table entry.
+This is a Phase B bootstrap layout chosen because it is an actual partition in
+the bundled bootloader table. It is intentionally small. Replace it with an
+explicit OmniPortal data partition before storing more than a few mutable
+entities or doing extended gameplay writeback testing.
 
 Useful read endpoints:
 

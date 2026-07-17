@@ -78,6 +78,9 @@ pub fn init() {
     let mut flash = StorageFlash::new();
     let mut catalog = Catalog::new();
     let scan = scan_flash(&mut flash, &mut catalog);
+    if scan.is_err() {
+        catalog.needs_format = true;
+    }
     #[cfg(not(target_arch = "xtensa"))]
     let _ = scan;
     #[cfg(target_arch = "xtensa")]
@@ -782,6 +785,7 @@ struct Store {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StorageError {
     Uninitialized,
+    NeedsFormat,
     BadRequest,
     NotFound,
     Full,
@@ -794,6 +798,7 @@ impl StorageError {
         match self {
             Self::BadRequest => "400 Bad Request",
             Self::NotFound => "404 Not Found",
+            Self::NeedsFormat => "409 Conflict",
             Self::Full => "507 Insufficient Storage",
             Self::Uninitialized | Self::Flash | Self::Corrupt => "500 Internal Server Error",
         }
@@ -802,6 +807,7 @@ impl StorageError {
     pub const fn message(self) -> &'static str {
         match self {
             Self::Uninitialized => "storage uninitialized",
+            Self::NeedsFormat => "storage needs format",
             Self::BadRequest => "bad request",
             Self::NotFound => "not found",
             Self::Full => "storage full",
@@ -818,6 +824,7 @@ struct Catalog {
     blobs: [Option<StoredBlob>; MAX_ENTITIES],
     active_entity_id: Option<RecordId>,
     active_config_generation: u32,
+    needs_format: bool,
     write_offset: u32,
     next_record_id: u32,
     next_blob_id: u32,
@@ -833,6 +840,7 @@ impl Catalog {
             blobs: [None; MAX_ENTITIES],
             active_entity_id: None,
             active_config_generation: 0,
+            needs_format: false,
             write_offset: 0,
             next_record_id: 1,
             next_blob_id: 1,
@@ -926,7 +934,12 @@ impl Catalog {
 
     fn status_json(&self) -> String {
         format!(
-            "{{\"storage\":\"ok\",\"identities\":{},\"entities\":{},\"active_entity_id\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
+            "{{\"storage\":\"{}\",\"identities\":{},\"entities\":{},\"active_entity_id\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
+            if self.needs_format {
+                "needs-format"
+            } else {
+                "ok"
+            },
             self.identity_count(),
             self.entity_count(),
             option_record_id_json(self.active_entity_id),
@@ -1183,6 +1196,10 @@ fn append_record(
     generation: u32,
     payload: &[u8],
 ) -> Result<(), StorageError> {
+    if catalog.needs_format {
+        return Err(StorageError::NeedsFormat);
+    }
+
     let payload_len = payload.len() as u32;
     let total_len = align4(JOURNAL_RECORD_HEADER_BYTES as u32 + payload_len);
     if catalog.write_offset + total_len > config::STORAGE_FLASH_BYTES {
@@ -1749,5 +1766,25 @@ mod tests {
             Err(StorageError::Corrupt)
         );
         assert_eq!(rebuilt.corrupt_records, 1);
+    }
+
+    #[test]
+    fn append_refuses_writes_when_storage_needs_format() {
+        let mut flash = StorageFlash::new();
+        let mut catalog = Catalog::new();
+        catalog.needs_format = true;
+
+        assert_eq!(
+            append_record(
+                &mut flash,
+                &mut catalog,
+                RECORD_KIND_ENTITY_DELETE,
+                8,
+                1,
+                &[]
+            ),
+            Err(StorageError::NeedsFormat)
+        );
+        assert_eq!(catalog.write_offset, 0);
     }
 }

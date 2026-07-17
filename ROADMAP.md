@@ -165,8 +165,6 @@ Definition of done: PC recognizes the ESP32-S3 as a generic HID device while the
   - identity fields,
   - required checksum.
 - [ ] Validate generated entity binary size and required fixed blocks before allowing selection.
-- [ ] Test against a PC-side Skylanders-aware tool first (e.g. Dolphin's Skylanders portal support, or SkyReader-based tooling) before using the real Wii.
-- [ ] Once PC-side testing passes, test on the actual Wii with a real Skylanders game.
 
 Definition of done: a Skylanders game running on the Wii sees the selected named entity, can write progress to it, and that changed entity can be downloaded after reboot.
 

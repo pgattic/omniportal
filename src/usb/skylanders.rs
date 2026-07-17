@@ -33,6 +33,7 @@ pub const FIGURE_BLOCK_BYTES: usize = 16;
 pub const FIGURE_BLOCK_COUNT: u8 = 64;
 pub const FIGURE_IMAGE_BYTES: usize = FIGURE_BLOCK_BYTES * FIGURE_BLOCK_COUNT as usize;
 pub const FIRST_FIGURE_SLOT_ID: u8 = 0x10;
+const STATUS_REPORTS_PER_QUEUED_STATE: u8 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -95,6 +96,7 @@ pub struct PortalState {
     active_entity_id: Option<u32>,
     slot_status: SlotStatus,
     queued_status: [Option<SlotStatus>; 4],
+    queued_status_hold: u8,
     image: [u8; FIGURE_IMAGE_BYTES],
     dirty: bool,
 }
@@ -107,6 +109,7 @@ impl PortalState {
             active_entity_id: None,
             slot_status: SlotStatus::Removed,
             queued_status: [None; 4],
+            queued_status_hold: 0,
             image: [0; FIGURE_IMAGE_BYTES],
             dirty: false,
         }
@@ -137,6 +140,7 @@ impl PortalState {
         self.active_entity_id = Some(entity_id);
         self.image.copy_from_slice(image);
         self.slot_status = SlotStatus::Added;
+        self.queued_status_hold = 0;
         self.queued_status = if was_present {
             [
                 Some(SlotStatus::Removing),
@@ -157,6 +161,7 @@ impl PortalState {
         }
         self.active_entity_id = None;
         self.slot_status = SlotStatus::Removing;
+        self.queued_status_hold = 0;
         self.queued_status = [
             Some(SlotStatus::Removing),
             Some(SlotStatus::Removed),
@@ -202,8 +207,14 @@ impl PortalState {
     }
 
     fn next_slot_status(&mut self) -> SlotStatus {
+        if self.queued_status_hold > 0 {
+            self.queued_status_hold -= 1;
+            return self.slot_status;
+        }
+
         if let Some(status) = pop_status(&mut self.queued_status) {
             self.slot_status = status;
+            self.queued_status_hold = STATUS_REPORTS_PER_QUEUED_STATE.saturating_sub(1);
         }
         self.slot_status
     }
@@ -442,13 +453,18 @@ mod tests {
         assert!(state.load_entity(1, &image));
 
         let first = handle_command(&mut state, &[b'S']).unwrap().report;
-        let second = handle_command(&mut state, &[b'S']).unwrap().report;
 
         assert_eq!(first[0], b'S');
         assert_eq!(&first[1..5], &0x03u32.to_le_bytes());
         assert_eq!(first[5], 0);
-        assert_eq!(&second[1..5], &0x01u32.to_le_bytes());
-        assert_eq!(second[5], 1);
+        for _ in 1..STATUS_REPORTS_PER_QUEUED_STATE {
+            assert_eq!(
+                handle_command(&mut state, &[b'S']).unwrap().report[1],
+                SlotStatus::Added as u8
+            );
+        }
+        let ready = handle_command(&mut state, &[b'S']).unwrap().report;
+        assert_eq!(&ready[1..5], &0x01u32.to_le_bytes());
     }
 
     #[test]
@@ -483,8 +499,7 @@ mod tests {
             *byte = index as u8;
         }
         assert!(state.load_entity(42, &image));
-        let _ = state.next_status_report();
-        let _ = state.next_status_report();
+        advance_slot_status(&mut state, SlotStatus::Ready);
 
         let query = handle_command(&mut state, &[b'Q', 0x10, 0x02]).unwrap();
         assert_eq!(&query.report[..3], &[b'Q', 0x10, 0x02]);
@@ -508,14 +523,23 @@ mod tests {
         let mut state = PortalState::new();
         let image = [0; FIGURE_IMAGE_BYTES];
         assert!(state.load_entity(1, &image));
-        assert_eq!(state.next_status_report()[1], SlotStatus::Added as u8);
-        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+        advance_slot_status(&mut state, SlotStatus::Added);
+        advance_slot_status(&mut state, SlotStatus::Ready);
 
         assert!(state.load_entity(1, &image));
 
-        assert_eq!(state.next_status_report()[1], SlotStatus::Removing as u8);
-        assert_eq!(state.next_status_report()[1], SlotStatus::Removed as u8);
-        assert_eq!(state.next_status_report()[1], SlotStatus::Added as u8);
-        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+        advance_slot_status(&mut state, SlotStatus::Removing);
+        advance_slot_status(&mut state, SlotStatus::Removed);
+        advance_slot_status(&mut state, SlotStatus::Added);
+        advance_slot_status(&mut state, SlotStatus::Ready);
+    }
+
+    fn advance_slot_status(state: &mut PortalState, expected: SlotStatus) {
+        for _ in 0..=STATUS_REPORTS_PER_QUEUED_STATE {
+            if state.next_status_report()[1] == expected as u8 {
+                return;
+            }
+        }
+        panic!("slot status did not advance to {:?}", expected);
     }
 }
