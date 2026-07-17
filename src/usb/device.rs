@@ -69,6 +69,8 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     active_selection_marker: Option<(u32, u32)>,
     last_logged_query: Option<(u8, u8)>,
     repeated_query_count: u16,
+    last_status_word: u32,
+    last_status_active: u8,
 }
 
 impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
@@ -100,6 +102,8 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             active_selection_marker: None,
             last_logged_query: None,
             repeated_query_count: 0,
+            last_status_word: 0xffff_ffff,
+            last_status_active: 0xff,
         }
     }
 
@@ -142,6 +146,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         }
 
         let report = self.state.next_status_report();
+        self.log_status_transition(&report);
         match self.ep_in.write(&report) {
             Ok(_) | Err(UsbError::WouldBlock) => {}
             Err(error) => {
@@ -150,6 +155,27 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                     error
                 );
             }
+        }
+    }
+
+    fn log_status_transition(&mut self, report: &skylanders::Report) {
+        if report[0] != b'S' {
+            return;
+        }
+
+        let status_word = u32::from_le_bytes([report[1], report[2], report[3], report[4]]);
+        let active = report[6];
+        if status_word == self.last_status_word && active == self.last_status_active {
+            return;
+        }
+        self.last_status_word = status_word;
+        self.last_status_active = active;
+
+        if status_word != 0 {
+            println!(
+                "Skylanders USB status: bits=0x{:08x}, counter={}, active={}",
+                status_word, report[5], active
+            );
         }
     }
 
