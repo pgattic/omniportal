@@ -65,8 +65,9 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         .await;
     } else if method == "GET" && path == routes::STATUS_PATH {
         let body = format!(
-            "{{\"mode\":\"skylanders\",\"active_entity\":{},\"storage\":{}}}\n",
+            "{{\"mode\":\"skylanders\",\"active_entity\":{},\"active_slots\":{},\"storage\":{}}}\n",
             crate::storage::active_entity_json(),
+            crate::storage::active_slots_json(),
             crate::storage::status_json()
         );
         write_text(socket, "200 OK", "application/json", &body).await;
@@ -141,7 +142,11 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         )
         .await;
     } else if method == "POST" && path == "/api/entity/clear-active" {
-        write_storage_result(socket, crate::storage::clear_active_entity()).await;
+        write_storage_result(
+            socket,
+            crate::storage::clear_active_entity_from_params(params(query, body).as_str()),
+        )
+        .await;
     } else if method == "POST" && path == "/api/storage/format" {
         write_storage_result(socket, crate::storage::format_storage()).await;
     } else if method == "POST" && path == "/api/storage/compact" {

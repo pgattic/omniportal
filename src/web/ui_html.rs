@@ -83,7 +83,7 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 </main>
 
 <script>
-let library = {identities:[], entities:[], active_entity_id:null};
+let library = {identities:[], entities:[], active_entity_id:null, active_slots:[]};
 let catalog = [];
 let catalogTotal = 0;
 let catalogTimer = 0;
@@ -113,9 +113,13 @@ async function refreshAll() {
 
 function renderStatus(status) {
   const storage = status.storage || {};
+  const slots = status.active_slots || [];
+  const slotText = slots.length
+    ? slots.map(slot => `${Number(slot.slot) + 1}: #${slot.entity_id}`).join(", ")
+    : "none";
   $("status").innerHTML =
     `<div>Mode: ${status.mode || "unknown"}</div>` +
-    `<div>Active entity: ${status.active_entity ?? "none"}</div>` +
+    `<div>Portal slots: ${slotText}</div>` +
     `<div>Records: ${storage.entities || 0} entities</div>` +
     `<div>Storage: ${storage.used_bytes || 0} / ${storage.capacity_bytes || 0} bytes</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
@@ -152,16 +156,22 @@ function itemShell(title, meta, actions) {
 
 function renderEntities() {
   const entities = [...(library.entities || [])].sort((left, right) => left.name.localeCompare(right.name));
+  const activeSlots = library.active_slots || [];
   $("entities").innerHTML = entities.map(item => {
-    const active = item.id === library.active_entity_id ? " active" : "";
+    const slots = activeSlots
+      .filter(slot => slot.entity_id === item.id)
+      .map(slot => Number(slot.slot) + 1);
+    const active = slots.length ? ` slots ${slots.join(",")}` : "";
     const download = `<a href="/api/entity/${item.id}.bin">Download</a>`;
     const clone = item.data_mode === "mutable-image"
       ? `<button onclick="cloneEntity(${item.id})">Clone</button>`
       : `<button onclick="cloneEntity(${item.id})">Create mutable copy</button>`;
+    const remove = slots.map(slot => `<button onclick="removeSlot(${slot - 1})">Remove slot ${slot}</button>`).join("");
     return itemShell(
       `#${item.id} ${item.name}${active}`,
       `${item.kind}, ${item.data_mode}, ${item.image_len} bytes, crc32 ${item.crc32}`,
-      `<button onclick="selectEntity(${item.id})">Select</button>` +
+      `<button onclick="placeEntity(${item.id})">Place</button>` +
+      remove +
       clone +
       `<button onclick="renameRecord('entity',${item.id})">Rename</button>` +
       `<button onclick="deleteRecord('entity',${item.id})">Delete</button>` +
@@ -204,8 +214,19 @@ async function post(path, params = "") {
   await refreshAll();
 }
 
-async function selectEntity(id) {
-  await post("/api/entity/select", `id=${id}`);
+async function placeEntity(id) {
+  const slot = prompt("Portal slot number", "1");
+  if (!slot) return;
+  const index = Number(slot) - 1;
+  if (!Number.isInteger(index) || index < 0 || index > 15) {
+    say("slot must be between 1 and 16");
+    return;
+  }
+  await post("/api/entity/select", `id=${id}&slot=${index}`);
+}
+
+async function removeSlot(slot) {
+  await post("/api/entity/clear-active", `slot=${slot}`);
 }
 
 async function clearActive() {

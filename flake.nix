@@ -26,7 +26,7 @@
               unset CARGO_BUILD_TARGET
               unset CARGO_UNSTABLE_BUILD_STD
               export RUSTC="${pkgs.rustc}/bin/rustc"
-              exec "${pkgs.cargo}/bin/cargo" test --lib "$@"
+              exec "${pkgs.cargo}/bin/cargo" test --target "${pkgs.stdenv.hostPlatform.config}" --lib "$@"
             '';
           };
         in

@@ -69,7 +69,7 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     idle_rate: u8,
     protocol: u8,
     storage_poll_ticks: u8,
-    active_selection_marker: Option<(u32, u32)>,
+    active_selection_marker: ([Option<u32>; skylanders::MAX_FIGURES], u32),
     dirty_write_deadline: Option<Instant>,
 }
 
@@ -99,7 +99,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             idle_rate: 0,
             protocol: 1,
             storage_poll_ticks: 0,
-            active_selection_marker: None,
+            active_selection_marker: ([None; skylanders::MAX_FIGURES], 0),
             dirty_write_deadline: None,
         }
     }
@@ -179,45 +179,55 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         }
         self.storage_poll_ticks = STORAGE_POLL_TICKS;
 
-        let active_marker =
-            storage::active_entity_marker().map(|(id, generation)| (id.0, generation));
+        let (active_slots, active_generation) = storage::active_slots_marker();
+        let active_marker = (active_slots.map(|id| id.map(|id| id.0)), active_generation);
         if active_marker == self.active_selection_marker {
             return;
         }
+        let slot_map_changed = active_marker.0 != self.active_selection_marker.0;
 
         self.flush_dirty_entity(true);
-        match storage::active_entity_image() {
-            Ok(Some((id, image))) => {
-                if self.state.load_entity(id.0, &image) {
-                    self.active_selection_marker = active_marker;
-                    println!(
-                        "Skylanders USB loaded active entity {} ({} bytes)",
-                        id.0,
-                        image.len()
-                    );
-                } else {
-                    println!(
-                        "Skylanders USB rejected active entity {} image length {}",
-                        id.0,
-                        image.len()
-                    );
-                    self.state.clear_entity();
-                    self.active_selection_marker = None;
+        match storage::active_slot_images() {
+            Ok(images) => {
+                for slot in 0..skylanders::MAX_FIGURES {
+                    if active_marker.0[slot].is_none()
+                        && self.state.slot_entity_id(slot as u8).is_some()
+                    {
+                        self.state.clear_slot(slot as u8);
+                    }
                 }
-            }
-            Ok(None) => {
-                println!("Skylanders USB active entity cleared");
-                self.state.clear_entity();
+
+                let mut loaded = 0;
+                for (slot, id, image) in images {
+                    if slot_map_changed && self.state.slot_entity_id(slot) == Some(id.0) {
+                        continue;
+                    }
+                    if self.state.load_entity_into_slot(slot, id.0, &image) {
+                        loaded += 1;
+                    } else {
+                        println!(
+                            "Skylanders USB rejected slot {} entity {} image length {}",
+                            slot,
+                            id.0,
+                            image.len()
+                        );
+                        self.state.clear_slot(slot);
+                    }
+                }
+
                 self.active_selection_marker = active_marker;
+                if loaded > 0 {
+                    println!("Skylanders USB loaded {} active portal slot(s)", loaded);
+                }
             }
             Err(error) => {
                 println!(
-                    "Skylanders USB failed to read active entity: {} ({:?})",
+                    "Skylanders USB failed to read active slot state: {} ({:?})",
                     error.message(),
                     error
                 );
-                self.state.clear_entity();
-                self.active_selection_marker = None;
+                self.state.clear_all_entities();
+                self.active_selection_marker = ([None; skylanders::MAX_FIGURES], 0);
             }
         }
     }
@@ -245,22 +255,39 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             }
         }
 
-        if let Some(id) = self.state.active_entity_id() {
-            match storage::replace_entity_blob(RecordId(id), self.state.image()) {
+        let mut persisted = false;
+        for slot in 0..skylanders::MAX_FIGURES {
+            let slot = slot as u8;
+            if !self.state.is_slot_dirty(slot) {
+                continue;
+            }
+            let Some(id) = self.state.slot_entity_id(slot) else {
+                self.state.clear_slot_dirty(slot);
+                continue;
+            };
+            let Some(image) = self.state.slot_image(slot).copied() else {
+                self.state.clear_slot_dirty(slot);
+                continue;
+            };
+            match storage::replace_entity_blob(RecordId(id), &image) {
                 Ok(()) => {
-                    println!("Skylanders USB persisted writes for entity {}", id);
-                    self.state.clear_dirty();
-                    self.dirty_write_deadline = None;
+                    println!(
+                        "Skylanders USB persisted writes for slot {} entity {}",
+                        slot, id
+                    );
+                    self.state.clear_slot_dirty(slot);
+                    persisted = true;
                 }
                 Err(error) => {
                     println!(
-                        "Skylanders USB failed to persist writes for entity {}: {:?}",
-                        id, error
+                        "Skylanders USB failed to persist writes for slot {} entity {}: {:?}",
+                        slot, id, error
                     );
                 }
             }
-        } else {
-            self.state.clear_dirty();
+        }
+
+        if persisted || !self.state.is_dirty() {
             self.dirty_write_deadline = None;
         }
     }

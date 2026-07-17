@@ -16,6 +16,7 @@ use crate::storage::records::{
 use crate::storage::wear::{
     DEFAULT_COMMIT_DEBOUNCE_MS, JOURNAL_RECORD_HEADER_BYTES, JOURNAL_RECORD_MAGIC,
 };
+use crate::usb::skylanders::MAX_FIGURES;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -37,6 +38,7 @@ const RECORD_KIND_FORMAT_MARKER: u8 = 254;
 const ERASED_WORD: [u8; 4] = [0xff; 4];
 
 static STORE: Mutex<RefCell<Option<Store>>> = Mutex::new(RefCell::new(None));
+const CONFIG_SLOTS_MAGIC: &[u8; 4] = b"SLT1";
 
 #[cfg(not(target_arch = "xtensa"))]
 struct StorageFlash {
@@ -145,32 +147,39 @@ pub fn identity_json(id: RecordId) -> Result<String, StorageError> {
 }
 
 pub fn active_entity_json() -> String {
-    with_store(|store| option_record_id_json(store.catalog.active_entity_id))
+    with_store(|store| option_record_id_json(store.catalog.active_entity_id()))
         .unwrap_or_else(|| String::from("null"))
 }
 
 pub fn active_entity_id() -> Option<RecordId> {
-    with_store(|store| store.catalog.active_entity_id).flatten()
+    with_store(|store| store.catalog.active_entity_id()).flatten()
 }
 
-pub fn active_entity_marker() -> Option<(RecordId, u32)> {
+pub fn active_slots_json() -> String {
+    with_store(|store| store.catalog.active_slots_json()).unwrap_or_else(|| String::from("[]"))
+}
+
+pub fn active_slots_marker() -> ([Option<RecordId>; MAX_FIGURES], u32) {
     with_store(|store| {
-        store
-            .catalog
-            .active_entity_id
-            .map(|id| (id, store.catalog.active_config_generation))
+        (
+            store.catalog.active_slots,
+            store.catalog.active_config_generation,
+        )
     })
-    .flatten()
+    .unwrap_or(([None; MAX_FIGURES], 0))
 }
 
-pub fn active_entity_image() -> Result<Option<(RecordId, Vec<u8>)>, StorageError> {
+pub fn active_slot_images() -> Result<Vec<(u8, RecordId, Vec<u8>)>, StorageError> {
     with_store_mut(|store| {
-        let Some(id) = store.catalog.active_entity_id else {
-            return Ok(None);
-        };
-        let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
-        let image = read_entity_image(store, entity)?;
-        Ok(Some((id, image)))
+        let mut images = Vec::new();
+        for slot in 0..MAX_FIGURES {
+            let Some(id) = store.catalog.active_slots[slot] else {
+                continue;
+            };
+            let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
+            images.push((slot as u8, id, read_entity_image(store, entity)?));
+        }
+        Ok(images)
     })
 }
 
@@ -526,6 +535,12 @@ pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
     let id = query_param(params, "id")
         .and_then(|value| parse_u32(value.as_str()))
         .ok_or(StorageError::BadRequest)?;
+    let slot = query_param(params, "slot")
+        .and_then(|value| parse_u32(value.as_str()))
+        .unwrap_or(0);
+    if slot as usize >= MAX_FIGURES {
+        return Err(StorageError::BadRequest);
+    }
 
     with_store_mut(|store| {
         let id = RecordId(id);
@@ -533,20 +548,54 @@ pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
             return Err(StorageError::NotFound);
         }
         let generation = store.catalog.next_generation();
-        append_config_record(&mut store.flash, &mut store.catalog, Some(id), generation)?;
-        store.catalog.active_entity_id = Some(id);
+        store.catalog.active_slots[slot as usize] = Some(id);
+        let active_slots = store.catalog.active_slots;
+        append_config_record(
+            &mut store.flash,
+            &mut store.catalog,
+            active_slots,
+            generation,
+        )?;
         store.catalog.active_config_generation = generation;
-        Ok(format!("{{\"active_entity_id\":{}}}\n", id.0))
+        Ok(format!(
+            "{{\"active_entity_id\":{},\"slot\":{},\"active_slots\":{}}}\n",
+            id.0,
+            slot,
+            store.catalog.active_slots_json()
+        ))
     })
 }
 
 pub fn clear_active_entity() -> Result<String, StorageError> {
+    clear_active_entity_from_params("")
+}
+
+pub fn clear_active_entity_from_params(params: &str) -> Result<String, StorageError> {
+    let slot = query_param(params, "slot").and_then(|value| parse_u32(value.as_str()));
+    if slot.is_some_and(|slot| slot as usize >= MAX_FIGURES) {
+        return Err(StorageError::BadRequest);
+    }
+
     with_store_mut(|store| {
         let generation = store.catalog.next_generation();
-        append_config_record(&mut store.flash, &mut store.catalog, None, generation)?;
-        store.catalog.active_entity_id = None;
+        if let Some(slot) = slot {
+            store.catalog.active_slots[slot as usize] = None;
+        } else {
+            store.catalog.active_slots = [None; MAX_FIGURES];
+        }
+        let active_slots = store.catalog.active_slots;
+        append_config_record(
+            &mut store.flash,
+            &mut store.catalog,
+            active_slots,
+            generation,
+        )?;
         store.catalog.active_config_generation = generation;
-        Ok(String::from("{\"active_entity_id\":null}\n"))
+        Ok(format!(
+            "{{\"active_entity_id\":{},\"active_slots\":{}}}\n",
+            option_record_id_json(store.catalog.active_entity_id()),
+            store.catalog.active_slots_json()
+        ))
     })
 }
 
@@ -571,7 +620,7 @@ pub fn compact_storage() -> Result<String, StorageError> {
 
         let identities = store.catalog.identities;
         let entities = store.catalog.entities;
-        let active_entity_id = store.catalog.active_entity_id;
+        let active_slots = store.catalog.active_slots;
         let active_config_generation = store.catalog.active_config_generation;
         let next_record_id = store.catalog.next_record_id;
         let next_blob_id = store.catalog.next_blob_id;
@@ -650,14 +699,14 @@ pub fn compact_storage() -> Result<String, StorageError> {
             generation += 1;
         }
 
-        if let Some(active) = active_entity_id {
+        if active_slots.iter().any(Option::is_some) {
             append_config_record(
                 &mut store.flash,
                 &mut store.catalog,
-                Some(active),
+                active_slots,
                 generation,
             )?;
-            store.catalog.active_entity_id = Some(active);
+            store.catalog.active_slots = active_slots;
             store.catalog.active_config_generation = generation;
             generation += 1;
         } else {
@@ -817,7 +866,7 @@ struct Catalog {
     identities: [Option<CharacterIdentity>; MAX_IDENTITIES],
     entities: [Option<Entity>; MAX_ENTITIES],
     blobs: [Option<StoredBlob>; MAX_ENTITIES],
-    active_entity_id: Option<RecordId>,
+    active_slots: [Option<RecordId>; MAX_FIGURES],
     active_config_generation: u32,
     needs_format: bool,
     write_offset: u32,
@@ -833,7 +882,7 @@ impl Catalog {
             identities: [None; MAX_IDENTITIES],
             entities: [None; MAX_ENTITIES],
             blobs: [None; MAX_ENTITIES],
-            active_entity_id: None,
+            active_slots: [None; MAX_FIGURES],
             active_config_generation: 0,
             needs_format: false,
             write_offset: 0,
@@ -913,10 +962,36 @@ impl Catalog {
     }
 
     fn delete_entity(&mut self, id: RecordId) -> Result<(), StorageError> {
-        if self.active_entity_id == Some(id) {
-            self.active_entity_id = None;
+        for slot in &mut self.active_slots {
+            if *slot == Some(id) {
+                *slot = None;
+            }
         }
         delete_by_id(&mut self.entities, |item| item.id, id)
+    }
+
+    fn active_entity_id(&self) -> Option<RecordId> {
+        self.active_slots.iter().find_map(|id| *id)
+    }
+
+    fn active_slots_json(&self) -> String {
+        let mut out = String::from("[");
+        let mut first = true;
+        for (slot, entity_id) in self.active_slots.iter().enumerate() {
+            let Some(entity_id) = entity_id else {
+                continue;
+            };
+            if !first {
+                out.push(',');
+            }
+            first = false;
+            out.push_str(&format!(
+                "{{\"slot\":{},\"entity_id\":{}}}",
+                slot, entity_id.0
+            ));
+        }
+        out.push(']');
+        out
     }
 
     fn identity_count(&self) -> usize {
@@ -929,7 +1004,7 @@ impl Catalog {
 
     fn status_json(&self) -> String {
         format!(
-            "{{\"storage\":\"{}\",\"identities\":{},\"entities\":{},\"active_entity_id\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
+            "{{\"storage\":\"{}\",\"identities\":{},\"entities\":{},\"active_entity_id\":{},\"active_slots\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
             if self.needs_format {
                 "needs-format"
             } else {
@@ -937,7 +1012,8 @@ impl Catalog {
             },
             self.identity_count(),
             self.entity_count(),
-            option_record_id_json(self.active_entity_id),
+            option_record_id_json(self.active_entity_id()),
+            self.active_slots_json(),
             self.write_offset,
             config::STORAGE_FLASH_BYTES,
             self.corrupt_records
@@ -987,7 +1063,9 @@ impl Catalog {
             ));
         }
         out.push_str("],\"active_entity_id\":");
-        out.push_str(&option_record_id_json(self.active_entity_id));
+        out.push_str(&option_record_id_json(self.active_entity_id()));
+        out.push_str(",\"active_slots\":");
+        out.push_str(&self.active_slots_json());
         out.push_str("}\n");
         out
     }
@@ -1145,7 +1223,7 @@ fn apply_record(
         }
         RECORD_KIND_CONFIG_UPSERT => {
             catalog.next_generation = catalog.next_generation.max(record.generation + 1);
-            catalog.active_entity_id = decode_config(payload);
+            catalog.active_slots = decode_config(payload);
             catalog.active_config_generation = record.generation;
         }
         _ => {}
@@ -1194,16 +1272,17 @@ fn append_entity_record(store: &mut Store, entity: Entity) -> Result<(), Storage
 fn append_config_record(
     flash: &mut StorageFlash,
     catalog: &mut Catalog,
-    active_entity_id: Option<RecordId>,
+    active_slots: [Option<RecordId>; MAX_FIGURES],
     generation: u32,
 ) -> Result<(), StorageError> {
+    let payload = encode_config(active_slots);
     append_record(
         flash,
         catalog,
         RECORD_KIND_CONFIG_UPSERT,
         0,
         generation,
-        &encode_config(active_entity_id),
+        &payload,
     )
 }
 
@@ -1437,19 +1516,38 @@ fn decode_entity(id: u32, _generation: u32, payload: &[u8]) -> Option<Entity> {
     })
 }
 
-fn encode_config(active_entity_id: Option<RecordId>) -> [u8; 8] {
-    let mut out = [0; 8];
-    out[0] = u8::from(active_entity_id.is_some());
-    out[4..8].copy_from_slice(&active_entity_id.map(|id| id.0).unwrap_or(0).to_le_bytes());
+fn encode_config(active_slots: [Option<RecordId>; MAX_FIGURES]) -> [u8; 4 + MAX_FIGURES * 4] {
+    let mut out = [0; 4 + MAX_FIGURES * 4];
+    out[0..4].copy_from_slice(CONFIG_SLOTS_MAGIC);
+    for (slot, entity_id) in active_slots.iter().enumerate() {
+        let start = 4 + slot * 4;
+        out[start..start + 4].copy_from_slice(&entity_id.map(|id| id.0).unwrap_or(0).to_le_bytes());
+    }
     out
 }
 
-fn decode_config(payload: &[u8]) -> Option<RecordId> {
-    if payload.len() < 8 || payload[0] == 0 {
-        None
-    } else {
-        Some(RecordId(u32::from_le_bytes(payload[4..8].try_into().ok()?)))
+fn decode_config(payload: &[u8]) -> [Option<RecordId>; MAX_FIGURES] {
+    let mut active_slots = [None; MAX_FIGURES];
+    if payload.len() >= 4 + MAX_FIGURES * 4 && &payload[0..4] == CONFIG_SLOTS_MAGIC {
+        for (slot, active_slot) in active_slots.iter_mut().enumerate() {
+            let start = 4 + slot * 4;
+            let id = u32::from_le_bytes(payload[start..start + 4].try_into().unwrap_or([0; 4]));
+            if id != 0 {
+                *active_slot = Some(RecordId(id));
+            }
+        }
+        return active_slots;
     }
+
+    if payload.len() >= 8 && payload[0] != 0 {
+        if let Ok(bytes) = payload[4..8].try_into() {
+            let id = u32::from_le_bytes(bytes);
+            if id != 0 {
+                active_slots[0] = Some(RecordId(id));
+            }
+        }
+    }
+    active_slots
 }
 
 pub fn crc32(bytes: &[u8]) -> u32 {
@@ -1678,6 +1776,23 @@ mod tests {
     }
 
     #[test]
+    fn config_payload_supports_legacy_and_multi_slot_records() {
+        let legacy = [1, 0, 0, 0, 42, 0, 0, 0];
+        let decoded = decode_config(&legacy);
+        assert_eq!(decoded[0], Some(RecordId(42)));
+        assert_eq!(decoded[1], None);
+
+        let mut active_slots = [None; MAX_FIGURES];
+        active_slots[0] = Some(RecordId(8));
+        active_slots[3] = Some(RecordId(11));
+
+        let decoded = decode_config(&encode_config(active_slots));
+        assert_eq!(decoded[0], Some(RecordId(8)));
+        assert_eq!(decoded[3], Some(RecordId(11)));
+        assert_eq!(decoded[4], None);
+    }
+
+    #[test]
     fn catalog_upsert_replace_delete_and_active_selection_behave() {
         let mut catalog = Catalog::new();
         let mut identity = test_identity();
@@ -1694,10 +1809,10 @@ mod tests {
 
         let entity = test_entity();
         catalog.upsert_entity(entity).unwrap();
-        catalog.active_entity_id = Some(entity.id);
+        catalog.active_slots[0] = Some(entity.id);
         catalog.delete_entity(entity.id).unwrap();
         assert_eq!(catalog.entity_count(), 0);
-        assert_eq!(catalog.active_entity_id, None);
+        assert_eq!(catalog.active_entity_id(), None);
     }
 
     #[test]
@@ -1742,7 +1857,9 @@ mod tests {
             &encode_entity(&test_entity()),
         )
         .unwrap();
-        append_config_record(&mut flash, &mut catalog, Some(RecordId(8)), 5).unwrap();
+        let mut active_slots = [None; MAX_FIGURES];
+        active_slots[0] = Some(RecordId(8));
+        append_config_record(&mut flash, &mut catalog, active_slots, 5).unwrap();
 
         let used_bytes = catalog.write_offset;
         let mut rebuilt = Catalog::new();
@@ -1758,7 +1875,8 @@ mod tests {
             "Preston's Trigger Happy"
         );
         assert_eq!(rebuilt.blob(BlobId(2)).unwrap().len, image.len() as u32);
-        assert_eq!(rebuilt.active_entity_id, Some(RecordId(8)));
+        assert_eq!(rebuilt.active_entity_id(), Some(RecordId(8)));
+        assert_eq!(rebuilt.active_slots[0], Some(RecordId(8)));
         assert_eq!(rebuilt.next_record_id, 9);
         assert_eq!(rebuilt.next_blob_id, 3);
         assert_eq!(rebuilt.next_generation, 6);
