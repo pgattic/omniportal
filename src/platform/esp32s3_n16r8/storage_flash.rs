@@ -13,7 +13,7 @@ impl StorageFlash {
     }
 
     pub fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), ()> {
-        self.inner.read(offset, bytes).map_err(|_| ())
+        ReadNorFlash::read(&mut self.inner, offset, bytes).map_err(|_| ())
     }
 
     pub fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), ()> {
@@ -22,5 +22,9 @@ impl StorageFlash {
 
     pub fn erase(&mut self, from: u32, to: u32) -> Result<(), ()> {
         self.inner.erase(from, to).map_err(|_| ())
+    }
+
+    pub fn capacity(&self) -> usize {
+        ReadNorFlash::capacity(&self.inner)
     }
 }

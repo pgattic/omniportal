@@ -88,16 +88,14 @@ After connecting, the root page should show `Hello from ESP32-S3`, and
 
 ## Storage Smoke Test
 
-The firmware currently reuses the default ESP-IDF `nvs` data partition for the
-OmniPortal append-only journal:
+The firmware currently uses the free flash gap immediately after the bundled
+factory app partition for the OmniPortal append-only journal:
 
-* offset: `0x00009000`
-* size: `0x00006000`
+* offset: `0x00fb0000`
+* size: `0x00040000`
 
-This is a Phase B bootstrap layout chosen because it is an actual partition in
-the bundled bootloader table. It is intentionally small. Replace it with an
-explicit OmniPortal data partition before storing more than a few mutable
-entities or doing extended gameplay writeback testing.
+This is still a Phase B bootstrap layout. Replace it with an explicit
+OmniPortal data partition before relying on it as the final storage layout.
 
 Useful read endpoints:
 

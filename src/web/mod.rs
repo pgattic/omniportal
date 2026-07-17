@@ -410,8 +410,14 @@ async fn write_storage_result(
     result: Result<String, crate::storage::StorageError>,
 ) {
     match result {
-        Ok(body) => write_text(socket, "200 OK", "application/json", &body).await,
-        Err(error) => write_text(socket, error.status_code(), "text/plain", error.message()).await,
+        Ok(body) => {
+            println!("HTTP storage result OK");
+            write_text(socket, "200 OK", "application/json", &body).await;
+        }
+        Err(error) => {
+            println!("HTTP storage result error: {:?}", error);
+            write_text(socket, error.status_code(), "text/plain", error.message()).await;
+        }
     }
 }
 
