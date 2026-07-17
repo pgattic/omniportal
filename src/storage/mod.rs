@@ -764,12 +764,11 @@ fn read_blob(store: &mut Store, blob_id: BlobId) -> Result<Vec<u8>, StorageError
 }
 
 fn read_entity_image(store: &mut Store, entity: Entity) -> Result<Vec<u8>, StorageError> {
-    let mut image = if let Some(blob_id) = entity.blob_id {
+    let image = if let Some(blob_id) = entity.blob_id {
         read_blob(store, blob_id)?
     } else {
         generated_entity_image(entity)
     };
-    rekey_legacy_generated_uid(&mut image, entity);
     Ok(image)
 }
 
@@ -779,12 +778,6 @@ fn generated_entity_image(entity: Entity) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&image);
     out
-}
-
-fn rekey_legacy_generated_uid(image: &mut [u8], entity: Entity) {
-    if entity.image_format == ImageFormat::SkylandersMifare1k && image.get(0..4) == Some(b"OMNI") {
-        rekey_skylanders_entity_image(image, entity.character_id, entity.variant_id, entity.id.0);
-    }
 }
 
 fn entity_kind_is_mutable(kind: FigureKind) -> bool {

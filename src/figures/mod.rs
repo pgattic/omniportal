@@ -1,6 +1,7 @@
 pub mod catalog;
 pub mod formats;
 pub mod init;
+pub mod skylanders_crypto;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GameLine {
@@ -95,6 +96,7 @@ pub fn initialize() {
     let _ = catalog::SKYLANDERS_CATALOG.len();
     let _ = formats::MAX_FIGURE_IMAGE_BYTES;
     let _ = init::DEFAULT_ENTITY_NAME;
+    let _ = skylanders_crypto::FIGURE_SIZE;
     let _ = FigureIdentity {
         game_line: GameLine::Skylanders,
         model_id: 0,

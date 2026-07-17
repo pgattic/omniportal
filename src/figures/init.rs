@@ -1,6 +1,9 @@
 pub const DEFAULT_ENTITY_NAME: &str = "Fresh Entity";
 
 use crate::figures::formats::SKYLANDERS_IMAGE_BYTES;
+use crate::figures::skylanders_crypto::{
+    calculate_key_a, checksum_type0, FIRST_SECTOR_TRAILER_ACL, OTHER_SECTOR_TRAILER_ACL,
+};
 
 pub fn initialize_skylanders_placeholder(
     character_id: u32,
@@ -36,7 +39,7 @@ pub fn rekey_skylanders_entity_image(
     image[4] = image[0] ^ image[1] ^ image[2] ^ image[3];
     populate_header_fields(image, character_id, variant_id);
 
-    let crc = crc16(&image[..0x1e]);
+    let crc = checksum_type0(image).expect("skylanders image header is present");
     image[0x1e..0x20].copy_from_slice(&crc.to_le_bytes());
 
     let nuid = [image[0], image[1], image[2], image[3]];
@@ -88,10 +91,10 @@ fn populate_header_fields(image: &mut [u8], character_id: u32, variant_id: Optio
 }
 
 fn populate_sector_trailers(image: &mut [u8; SKYLANDERS_IMAGE_BYTES]) {
-    image[0x36..0x3a].copy_from_slice(&0x690f_0f0fu32.to_le_bytes());
+    image[0x36..0x3a].copy_from_slice(&FIRST_SECTOR_TRAILER_ACL.to_le_bytes());
     for sector in 1..0x10 {
         let offset = sector * 0x40 + 0x36;
-        image[offset..offset + 4].copy_from_slice(&0x6908_0f7fu32.to_le_bytes());
+        image[offset..offset + 4].copy_from_slice(&OTHER_SECTOR_TRAILER_ACL.to_le_bytes());
     }
 }
 
@@ -106,54 +109,15 @@ fn populate_keys(image: &mut [u8; SKYLANDERS_IMAGE_BYTES]) {
     }
 }
 
-fn calculate_key_a(sector: u8, nuid: [u8; 4]) -> u64 {
-    if sector == 0 {
-        return 73 * 2017 * 560_381_651;
-    }
-
-    let crc = crc48(&[nuid[0], nuid[1], nuid[2], nuid[3], sector]);
-    crc.swap_bytes() >> 16
-}
-
 fn compute_checksum_type0(image: &mut [u8; SKYLANDERS_IMAGE_BYTES]) {
-    let crc = crc16(&image[..0x1e]);
+    let crc = checksum_type0(image).expect("skylanders image header is present");
     image[0x1e..0x20].copy_from_slice(&crc.to_le_bytes());
-}
-
-fn crc16(data: &[u8]) -> u16 {
-    let mut crc = 0xffffu16;
-    for byte in data {
-        crc ^= (*byte as u16) << 8;
-        for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 {
-                (crc << 1) ^ 0x1021
-            } else {
-                crc << 1
-            };
-        }
-    }
-    crc
-}
-
-fn crc48(data: &[u8]) -> u64 {
-    const POLYNOMIAL: u64 = 0x42f0_e1eb_a9ea_3693;
-    let mut crc = 2 * 2 * 3 * 1103 * 12_868_356_821u64;
-    for byte in data {
-        crc ^= (*byte as u64) << 40;
-        for _ in 0..8 {
-            crc = if crc & (1 << 47) != 0 {
-                (crc << 1) ^ POLYNOMIAL
-            } else {
-                crc << 1
-            };
-        }
-    }
-    crc & 0x0000_ffff_ffff_ffff
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::figures::skylanders_crypto::{crc16_ccitt_false, validate_generated_image};
 
     #[test]
     fn generated_skylanders_image_matches_dolphin_create_layout() {
@@ -167,9 +131,13 @@ mod tests {
         assert_eq!(image[0x13], 0);
         assert_eq!(&image[0x14..0x1c], &[0; 8]);
         assert_eq!(&image[0x1c..0x1e], &0u16.to_le_bytes());
-        assert_eq!(&image[0x1e..0x20], &crc16(&image[..0x1e]).to_le_bytes());
+        assert_eq!(
+            &image[0x1e..0x20],
+            &crc16_ccitt_false(&image[..0x1e]).to_le_bytes()
+        );
         assert_eq!(&image[0x36..0x3a], &0x690f_0f0fu32.to_le_bytes());
         assert_eq!(&image[0x76..0x7a], &0x6908_0f7fu32.to_le_bytes());
+        assert_eq!(validate_generated_image(&image), Ok(()));
     }
 
     #[test]
@@ -181,8 +149,13 @@ mod tests {
         assert_eq!(&first[0..4], &first_again[0..4]);
         assert_ne!(&first[0..4], &second[0..4]);
         assert_eq!(first[4], first[0] ^ first[1] ^ first[2] ^ first[3]);
-        assert_eq!(&first[0x1e..0x20], &crc16(&first[..0x1e]).to_le_bytes());
+        assert_eq!(
+            &first[0x1e..0x20],
+            &crc16_ccitt_false(&first[..0x1e]).to_le_bytes()
+        );
         assert_ne!(&first[0x70..0x76], &second[0x70..0x76]);
+        assert_eq!(validate_generated_image(&first), Ok(()));
+        assert_eq!(validate_generated_image(&second), Ok(()));
     }
 
     #[test]
@@ -198,7 +171,11 @@ mod tests {
         assert_ne!(&image[0x70..0x76], old_key.as_slice());
         assert_eq!(image[4], image[0] ^ image[1] ^ image[2] ^ image[3]);
         assert_eq!(&image[0x14..0x1c], &[0; 8]);
-        assert_eq!(&image[0x1e..0x20], &crc16(&image[..0x1e]).to_le_bytes());
+        assert_eq!(
+            &image[0x1e..0x20],
+            &crc16_ccitt_false(&image[..0x1e]).to_le_bytes()
+        );
+        assert_eq!(validate_generated_image(&image), Ok(()));
     }
 
     #[test]
@@ -210,6 +187,10 @@ mod tests {
         assert_eq!(image[0x13], 0);
         assert_eq!(&image[0x14..0x1c], &[0; 8]);
         assert_eq!(&image[0x1c..0x1e], &0x0789u16.to_le_bytes());
-        assert_eq!(&image[0x1e..0x20], &crc16(&image[..0x1e]).to_le_bytes());
+        assert_eq!(
+            &image[0x1e..0x20],
+            &crc16_ccitt_false(&image[..0x1e]).to_le_bytes()
+        );
+        assert_eq!(validate_generated_image(&image), Ok(()));
     }
 }
