@@ -211,7 +211,11 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                 self.active_selection_marker = active_marker;
             }
             Err(error) => {
-                println!("Skylanders USB failed to read active entity: {:?}", error);
+                println!(
+                    "Skylanders USB failed to read active entity: {} ({:?})",
+                    error.message(),
+                    error
+                );
                 self.state.clear_entity();
                 self.active_selection_marker = None;
             }

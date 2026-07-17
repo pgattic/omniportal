@@ -169,18 +169,7 @@ pub fn active_entity_image() -> Result<Option<(RecordId, Vec<u8>)>, StorageError
             return Ok(None);
         };
         let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
-        let image = match read_entity_image(store, entity) {
-            Ok(image) => image,
-            Err(StorageError::Corrupt) => {
-                #[cfg(target_arch = "xtensa")]
-                println!(
-                    "Storage active entity {} blob corrupt; using generated image",
-                    id.0
-                );
-                generated_entity_image(entity)
-            }
-            Err(error) => return Err(error),
-        };
+        let image = read_entity_image(store, entity)?;
         Ok(Some((id, image)))
     })
 }
@@ -818,7 +807,7 @@ impl StorageError {
             Self::NotFound => "not found",
             Self::Full => "storage full",
             Self::Flash => "flash error",
-            Self::Corrupt => "corrupt storage record",
+            Self::Corrupt => "stored entity data is corrupt",
         }
     }
 }
