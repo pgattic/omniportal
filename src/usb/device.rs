@@ -1,3 +1,4 @@
+use embassy_time::Instant;
 use embassy_time::{Duration, Timer};
 use esp_hal::{
     otg_fs::{Usb, UsbBus as EspUsbBus},
@@ -19,6 +20,8 @@ use crate::{
 
 const REPORT_QUEUE_LEN: usize = 4;
 const STORAGE_POLL_TICKS: u8 = 50;
+const STORAGE_WRITE_DEBOUNCE: Duration =
+    Duration::from_millis(crate::storage::wear::DEFAULT_COMMIT_DEBOUNCE_MS as u64);
 #[embassy_executor::task]
 pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'static>) {
     static EP_MEMORY: StaticCell<[u32; 1024]> = StaticCell::new();
@@ -71,6 +74,7 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     repeated_query_count: u16,
     last_status_word: u32,
     last_status_active: u8,
+    dirty_write_deadline: Option<Instant>,
 }
 
 impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
@@ -104,6 +108,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             repeated_query_count: 0,
             last_status_word: 0xffff_ffff,
             last_status_active: 0xff,
+            dirty_write_deadline: None,
         }
     }
 
@@ -111,7 +116,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         self.poll_active_entity();
         self.poll_out_endpoint();
         self.poll_in_endpoint();
-        self.flush_dirty_entity();
+        self.flush_dirty_entity(false);
     }
 
     fn poll_out_endpoint(&mut self) {
@@ -188,6 +193,9 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             if should_log || matches!(response.report[0], b'Q' | b'W') {
                 log_response(response.queue_report, &response.report);
             }
+            if command.first().copied() == Some(b'W') && response.report[0] == b'W' {
+                self.schedule_dirty_flush();
+            }
             if response.queue_report {
                 self.push_report(response.report);
             }
@@ -232,7 +240,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             return;
         }
 
-        self.flush_dirty_entity();
+        self.flush_dirty_entity(true);
         match storage::active_entity_image() {
             Ok(Some((id, image))) => {
                 if self.state.load_entity(id.0, &image) {
@@ -265,9 +273,27 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         }
     }
 
-    fn flush_dirty_entity(&mut self) {
+    fn schedule_dirty_flush(&mut self) {
+        if self.state.is_dirty() {
+            self.dirty_write_deadline = Some(Instant::now() + STORAGE_WRITE_DEBOUNCE);
+        }
+    }
+
+    fn flush_dirty_entity(&mut self, force: bool) {
         if !self.state.is_dirty() {
+            self.dirty_write_deadline = None;
             return;
+        }
+
+        if !force {
+            match self.dirty_write_deadline {
+                Some(deadline) if Instant::now() < deadline => return,
+                Some(_) => {}
+                None => {
+                    self.schedule_dirty_flush();
+                    return;
+                }
+            }
         }
 
         if let Some(id) = self.state.active_entity_id() {
@@ -275,6 +301,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                 Ok(()) => {
                     println!("Skylanders USB persisted writes for entity {}", id);
                     self.state.clear_dirty();
+                    self.dirty_write_deadline = None;
                 }
                 Err(error) => {
                     println!(
@@ -283,6 +310,9 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                     );
                 }
             }
+        } else {
+            self.state.clear_dirty();
+            self.dirty_write_deadline = None;
         }
     }
 

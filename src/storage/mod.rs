@@ -1206,8 +1206,26 @@ fn append_record(
     flash
         .write(config::STORAGE_FLASH_OFFSET + catalog.write_offset, &record)
         .map_err(|_| StorageError::Flash)?;
+    verify_appended_record(flash, catalog.write_offset, &record)?;
     catalog.write_offset += record.len() as u32;
     Ok(())
+}
+
+fn verify_appended_record(
+    flash: &mut StorageFlash,
+    offset: u32,
+    expected: &[u8],
+) -> Result<(), StorageError> {
+    let mut actual = Vec::new();
+    actual.resize(expected.len(), 0);
+    flash
+        .read(config::STORAGE_FLASH_OFFSET + offset, &mut actual)
+        .map_err(|_| StorageError::Flash)?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(StorageError::Flash)
+    }
 }
 
 struct JournalHeader {
