@@ -123,6 +123,7 @@ Definition of done: phone connects to the ESP32-S3's own open WiFi network and l
 ### Phase B — Persistent Storage Bring-Up (no USB protocol yet)
 
 - [x] Choose the storage layout for flash: reserved partition/region, append-only journal or small embedded filesystem, metadata records, binary blob records, and garbage collection strategy.
+- [x] Add an explicit ESP32-S3 partition-table entry for OmniPortal storage instead of relying on an undocumented free flash gap.
 - [x] Define the data model:
   - Figure identity: game line, display name, character/model ID, variant ID if applicable, optional physical tag UID/NUID, type/slot category, source notes, checksum.
   - Entity: named collection entry generated from a catalog type or uploaded directly, data mode (`static-generated` or `mutable-image`), parent identity ID if any, creation/update timestamps or monotonic counters if available, checksum.
@@ -136,6 +137,9 @@ Definition of done: phone connects to the ESP32-S3's own open WiFi network and l
 - [ ] Confirm uploads survive reboot and power loss during a non-active upload.
 
 Definition of done: phone can create/import an identity, generate a named fresh entity from it, download the entity, reboot, and see the same library again.
+
+Host-side storage/protocol tests run with `omniportal-host-test` from the Nix
+development shell.
 
 ### Phase C — Minimal USB HID Device (no protocol logic yet)
 

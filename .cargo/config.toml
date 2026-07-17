@@ -1,12 +1,6 @@
-[build]
-target = "xtensa-esp32s3-none-elf"
-
-[unstable]
-build-std = ["core", "alloc"]
-
 [target.xtensa-esp32s3-none-elf]
 linker = "ldproxy"
-runner = "espflash flash --monitor"
+runner = "espflash flash --partition-table partitions/esp32s3-n16r8.csv --monitor"
 rustflags = [
   "-C",
   "link-arg=--ldproxy-linker",

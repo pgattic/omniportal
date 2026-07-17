@@ -27,13 +27,16 @@ cargo build --release
 Run host-side unit tests:
 
 ```sh
-cargo test -Z build-std=std --target "$(rustc -vV | sed -n 's/^host: //p')" --lib
+omniportal-host-test
 ```
 
 Flash and monitor:
 
 ```sh
-espflash flash --monitor target/xtensa-esp32s3-none-elf/release/omniportal
+espflash flash \
+  --partition-table partitions/esp32s3-n16r8.csv \
+  --monitor \
+  target/xtensa-esp32s3-none-elf/release/omniportal
 ```
 
 ## Code Structure
@@ -88,14 +91,15 @@ After connecting, the root page should show `Hello from ESP32-S3`, and
 
 ## Storage Smoke Test
 
-The firmware currently uses the free flash gap immediately after the bundled
-factory app partition for the OmniPortal append-only journal:
+The firmware uses an explicit `omniportal` data partition for the append-only
+journal:
 
 * offset: `0x00fb0000`
 * size: `0x00040000`
 
-This is still a Phase B bootstrap layout. Replace it with an explicit
-OmniPortal data partition before relying on it as the final storage layout.
+The partition table lives at `partitions/esp32s3-n16r8.csv`. The factory app
+partition remains at `0x10000` and is sized to end immediately before the
+OmniPortal storage partition.
 
 Useful read endpoints:
 

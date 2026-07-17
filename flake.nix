@@ -13,7 +13,24 @@
         "aarch64-linux"
       ];
 
-      perSystem = { pkgs, ... }: {
+      perSystem = { pkgs, ... }:
+        let
+          omniportal-host-test = pkgs.writeShellApplication {
+            name = "omniportal-host-test";
+            runtimeInputs = [
+              pkgs.cargo
+              pkgs.rustc
+            ];
+            text = ''
+              unset RUSTUP_TOOLCHAIN
+              unset CARGO_BUILD_TARGET
+              unset CARGO_UNSTABLE_BUILD_STD
+              export RUSTC="${pkgs.rustc}/bin/rustc"
+              exec "${pkgs.cargo}/bin/cargo" test --lib "$@"
+            '';
+          };
+        in
+      {
         devShells.default = pkgs.mkShell {
           NIX_LD = pkgs.stdenv.cc.bintools.dynamicLinker;
           NIX_LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
@@ -27,6 +44,7 @@
             espup
             ldproxy
             file
+            omniportal-host-test
             libusb1
             patchelf
             pkg-config
@@ -41,6 +59,8 @@
             export RUSTUP_HOME="''${RUSTUP_HOME:-$PWD/.rustup}"
             export CARGO_HOME="''${CARGO_HOME:-$PWD/.cargo-home}"
             export RUSTUP_TOOLCHAIN="''${RUSTUP_TOOLCHAIN:-esp}"
+            export CARGO_BUILD_TARGET="''${CARGO_BUILD_TARGET:-xtensa-esp32s3-none-elf}"
+            export CARGO_UNSTABLE_BUILD_STD="''${CARGO_UNSTABLE_BUILD_STD:-core,alloc}"
             export PATH="$CARGO_HOME/bin:$PATH"
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.libusb1 ]}:''${LD_LIBRARY_PATH:-}"
 
@@ -52,7 +72,8 @@
             echo "  first setup: espup install --targets esp32s3 --export-file $PWD/export-esp.sh"
             echo "  on NixOS:     scripts/patch-esp-toolchain-nixos.sh"
             echo "  build:       cargo build"
-            echo "  flash:       espflash flash --monitor target/xtensa-esp32s3-none-elf/debug/omniportal"
+            echo "  host tests:  omniportal-host-test"
+            echo "  flash:       espflash flash --partition-table partitions/esp32s3-n16r8.csv --monitor target/xtensa-esp32s3-none-elf/debug/omniportal"
           '';
         };
       };
