@@ -82,22 +82,6 @@ impl StorageFlash {
 pub fn init() {
     let _ = DEFAULT_COMMIT_DEBOUNCE_MS;
     let mut flash = StorageFlash::new();
-    #[cfg(target_arch = "xtensa")]
-    {
-        let mut first_word = [0; 4];
-        let first_word_result = flash.read(config::STORAGE_FLASH_OFFSET, &mut first_word);
-        println!(
-            "Storage flash: capacity={} bytes, offset=0x{:08x}, len={} bytes, first_word_read={:?}, first_word={:02x} {:02x} {:02x} {:02x}",
-            flash.capacity(),
-            config::STORAGE_FLASH_OFFSET,
-            config::STORAGE_FLASH_BYTES,
-            first_word_result,
-            first_word[0],
-            first_word[1],
-            first_word[2],
-            first_word[3]
-        );
-    }
     let mut catalog = Catalog::new();
     let scan = scan_flash(&mut flash, &mut catalog);
     if scan.is_err() {
@@ -107,12 +91,11 @@ pub fn init() {
     let _ = scan;
     #[cfg(target_arch = "xtensa")]
     println!(
-        "Storage scan: identities={}, entities={}, used={} bytes, status={}, error={:?}",
+        "Storage scan: identities={}, entities={}, used={} bytes, status={}",
         catalog.identity_count(),
         catalog.entity_count(),
         catalog.write_offset,
-        if scan.is_ok() { "ok" } else { "needs-format" },
-        scan.err()
+        if scan.is_ok() { "ok" } else { "needs-format" }
     );
 
     critical_section::with(|cs| {

@@ -70,10 +70,6 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     protocol: u8,
     storage_poll_ticks: u8,
     active_selection_marker: Option<(u32, u32)>,
-    last_logged_query: Option<(u8, u8)>,
-    repeated_query_count: u16,
-    last_status_word: u32,
-    last_status_active: u8,
     dirty_write_deadline: Option<Instant>,
 }
 
@@ -104,10 +100,6 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             protocol: 1,
             storage_poll_ticks: 0,
             active_selection_marker: None,
-            last_logged_query: None,
-            repeated_query_count: 0,
-            last_status_word: 0xffff_ffff,
-            last_status_active: 0xff,
             dirty_write_deadline: None,
         }
     }
@@ -151,7 +143,6 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         }
 
         let report = self.state.next_status_report();
-        self.log_status_transition(&report);
         match self.ep_in.write(&report) {
             Ok(_) | Err(UsbError::WouldBlock) => {}
             Err(error) => {
@@ -163,36 +154,8 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         }
     }
 
-    fn log_status_transition(&mut self, report: &skylanders::Report) {
-        if report[0] != b'S' {
-            return;
-        }
-
-        let status_word = u32::from_le_bytes([report[1], report[2], report[3], report[4]]);
-        let active = report[6];
-        if status_word == self.last_status_word && active == self.last_status_active {
-            return;
-        }
-        self.last_status_word = status_word;
-        self.last_status_active = active;
-
-        if status_word != 0 {
-            println!(
-                "Skylanders USB status: bits=0x{:08x}, counter={}, active={}",
-                status_word, report[5], active
-            );
-        }
-    }
-
     fn handle_command_source(&mut self, source: &str, command: &[u8]) {
-        let should_log = self.should_log_command(command);
-        if should_log {
-            log_command(source, command);
-        }
         if let Some(response) = skylanders::handle_command(&mut self.state, command) {
-            if should_log || matches!(response.report[0], b'Q' | b'W') {
-                log_response(response.queue_report, &response.report);
-            }
             if command.first().copied() == Some(b'W') && response.report[0] == b'W' {
                 self.schedule_dirty_flush();
             }
@@ -207,24 +170,6 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                 command.first().copied().unwrap_or(0)
             );
         }
-    }
-
-    fn should_log_command(&mut self, command: &[u8]) -> bool {
-        if command.first().copied() == Some(b'Q') {
-            let query = (byte(command, 1), byte(command, 2));
-            if Some(query) != self.last_logged_query {
-                self.last_logged_query = Some(query);
-                self.repeated_query_count = 0;
-                return true;
-            }
-            self.repeated_query_count = self.repeated_query_count.saturating_add(1);
-            return self.repeated_query_count == 128;
-        }
-
-        matches!(
-            command.first().copied().unwrap_or(0),
-            b'W' | b'M' | b'J' | b'L' | b'V' | b'Z'
-        )
     }
 
     fn poll_active_entity(&mut self) {
@@ -348,41 +293,6 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     }
 }
 
-fn log_command(source: &str, command: &[u8]) {
-    println!(
-        "Skylanders USB cmd {}: len={}, bytes={:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-        source,
-        command.len(),
-        byte(command, 0),
-        byte(command, 1),
-        byte(command, 2),
-        byte(command, 3),
-        byte(command, 4),
-        byte(command, 5),
-        byte(command, 6),
-        byte(command, 7)
-    );
-}
-
-fn log_response(queued: bool, report: &[u8; skylanders::REPORT_BYTES]) {
-    println!(
-        "Skylanders USB rsp queued={}: bytes={:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-        queued,
-        report[0],
-        report[1],
-        report[2],
-        report[3],
-        report[4],
-        report[5],
-        report[6],
-        report[7]
-    );
-}
-
-fn byte(bytes: &[u8], index: usize) -> u8 {
-    bytes.get(index).copied().unwrap_or(0)
-}
-
 impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
     fn get_configuration_descriptors(
         &self,
@@ -417,7 +327,6 @@ impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
             && req.request == Request::GET_DESCRIPTOR
             && req.descriptor_type_index().0 == skylanders::HID_REPORT_DESCRIPTOR_TYPE
         {
-            println!("Skylanders USB GET_DESCRIPTOR report");
             let _ = xfer.accept_with_static(skylanders::HID_REPORT_DESCRIPTOR);
             return;
         }
@@ -426,15 +335,12 @@ impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
             match req.request {
                 skylanders::HID_GET_REPORT_REQUEST => {
                     let report = self.state.next_status_report();
-                    println!("Skylanders USB GET_REPORT status");
                     let _ = xfer.accept_with(&report);
                 }
                 skylanders::HID_GET_IDLE_REQUEST => {
-                    println!("Skylanders USB GET_IDLE");
                     let _ = xfer.accept_with(&[self.idle_rate]);
                 }
                 skylanders::HID_GET_PROTOCOL_REQUEST => {
-                    println!("Skylanders USB GET_PROTOCOL protocol={}", self.protocol);
                     let _ = xfer.accept_with(&[self.protocol]);
                 }
                 _ => {
@@ -466,12 +372,10 @@ impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
                 }
                 skylanders::HID_SET_IDLE_REQUEST => {
                     self.idle_rate = (req.value >> 8) as u8;
-                    println!("Skylanders USB SET_IDLE rate={}", self.idle_rate);
                     let _ = xfer.accept();
                 }
                 skylanders::HID_SET_PROTOCOL_REQUEST => {
                     self.protocol = req.value as u8;
-                    println!("Skylanders USB SET_PROTOCOL protocol={}", self.protocol);
                     let _ = xfer.accept();
                 }
                 _ => {

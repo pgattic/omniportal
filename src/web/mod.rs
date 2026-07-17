@@ -55,10 +55,6 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     let (path, query) = split_target(target);
     let body = request_body(request).unwrap_or(&[]);
 
-    if method == "POST" {
-        println!("HTTP POST {}", path);
-    }
-
     if method == "GET" && path == "/" {
         write_text(socket, "200 OK", "text/html", ui_html::INDEX_HTML).await;
     } else if method == "GET" && path == "/favicon.ico" {
@@ -410,10 +406,7 @@ async fn write_storage_result(
     result: Result<String, crate::storage::StorageError>,
 ) {
     match result {
-        Ok(body) => {
-            println!("HTTP storage result OK");
-            write_text(socket, "200 OK", "application/json", &body).await;
-        }
+        Ok(body) => write_text(socket, "200 OK", "application/json", &body).await,
         Err(error) => {
             println!("HTTP storage result error: {:?}", error);
             write_text(socket, error.status_code(), "text/plain", error.message()).await;

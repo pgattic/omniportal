@@ -23,8 +23,4 @@ impl StorageFlash {
     pub fn erase(&mut self, from: u32, to: u32) -> Result<(), ()> {
         self.inner.erase(from, to).map_err(|_| ())
     }
-
-    pub fn capacity(&self) -> usize {
-        ReadNorFlash::capacity(&self.inner)
-    }
 }
