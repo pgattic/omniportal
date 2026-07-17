@@ -34,6 +34,7 @@ pub fn rekey_skylanders_entity_image(
     let uid = generated_uid(character_id, variant_id, entity_id);
     image[0..4].copy_from_slice(&uid);
     image[4] = image[0] ^ image[1] ^ image[2] ^ image[3];
+    populate_header_fields(image, character_id, variant_id);
 
     let crc = crc16(&image[..0x1e]);
     image[0x1e..0x20].copy_from_slice(&crc.to_le_bytes());
@@ -63,9 +64,7 @@ pub fn initialize_skylanders_placeholder_with_uid(
     image[7] = 0x0f;
 
     populate_sector_trailers(&mut image);
-
-    image[0x10..0x12].copy_from_slice(&(character_id as u16).to_le_bytes());
-    image[0x1c..0x1e].copy_from_slice(&(variant_id.unwrap_or(0) as u16).to_le_bytes());
+    populate_header_fields(&mut image, character_id, variant_id);
     compute_checksum_type0(&mut image);
     populate_keys(&mut image);
     image
@@ -80,6 +79,12 @@ fn generated_uid(character_id: u32, variant_id: Option<u32>, entity_id: u32) -> 
     let mut uid = seed.to_le_bytes();
     uid[0] = (uid[0] & 0xfe) | 0x04;
     uid
+}
+
+fn populate_header_fields(image: &mut [u8], character_id: u32, variant_id: Option<u32>) {
+    image[0x10..0x12].copy_from_slice(&(character_id as u16).to_le_bytes());
+    image[0x12..0x1c].fill(0);
+    image[0x1c..0x1e].copy_from_slice(&(variant_id.unwrap_or(0) as u16).to_le_bytes());
 }
 
 fn populate_sector_trailers(image: &mut [u8; SKYLANDERS_IMAGE_BYTES]) {
@@ -158,6 +163,9 @@ mod tests {
         assert_eq!(image[4], b'O' ^ b'M' ^ b'N' ^ b'I');
         assert_eq!(&image[5..8], &[0x81, 0x01, 0x0f]);
         assert_eq!(&image[0x10..0x12], &19u16.to_le_bytes());
+        assert_eq!(image[0x12], 0);
+        assert_eq!(image[0x13], 0);
+        assert_eq!(&image[0x14..0x1c], &[0; 8]);
         assert_eq!(&image[0x1c..0x1e], &0u16.to_le_bytes());
         assert_eq!(&image[0x1e..0x20], &crc16(&image[..0x1e]).to_le_bytes());
         assert_eq!(&image[0x36..0x3a], &0x690f_0f0fu32.to_le_bytes());
@@ -182,12 +190,26 @@ mod tests {
         let mut image = initialize_skylanders_entity_image(21, None, 1);
         let old_uid = image[0..4].to_vec();
         let old_key = image[0x70..0x76].to_vec();
+        image[0x14..0x1c].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
         assert!(rekey_skylanders_entity_image(&mut image, 21, None, 2));
 
         assert_ne!(&image[0..4], old_uid.as_slice());
         assert_ne!(&image[0x70..0x76], old_key.as_slice());
         assert_eq!(image[4], image[0] ^ image[1] ^ image[2] ^ image[3]);
+        assert_eq!(&image[0x14..0x1c], &[0; 8]);
+        assert_eq!(&image[0x1e..0x20], &crc16(&image[..0x1e]).to_le_bytes());
+    }
+
+    #[test]
+    fn generated_header_matches_dolphin_create_id_layout() {
+        let image = initialize_skylanders_placeholder(0x12_3456, Some(0x0789));
+
+        assert_eq!(&image[0x10..0x12], &0x3456u16.to_le_bytes());
+        assert_eq!(image[0x12], 0);
+        assert_eq!(image[0x13], 0);
+        assert_eq!(&image[0x14..0x1c], &[0; 8]);
+        assert_eq!(&image[0x1c..0x1e], &0x0789u16.to_le_bytes());
         assert_eq!(&image[0x1e..0x20], &crc16(&image[..0x1e]).to_le_bytes());
     }
 }
