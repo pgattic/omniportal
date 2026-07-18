@@ -65,7 +65,8 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         .await;
     } else if method == "GET" && path == routes::STATUS_PATH {
         let body = format!(
-            "{{\"mode\":\"skylanders\",\"active_entity\":{},\"active_slots\":{},\"storage\":{}}}\n",
+            "{{\"mode\":\"{}\",\"active_entity\":{},\"active_slots\":{},\"storage\":{}}}\n",
+            crate::usb::DEVICE_MODE.wire_name(),
             crate::storage::active_entity_json(),
             crate::storage::active_slots_json(),
             crate::storage::status_json()

@@ -178,13 +178,23 @@ pub fn active_slots_marker() -> ([Option<RecordId>; MAX_FIGURES], u32) {
 }
 
 pub fn active_slot_images() -> Result<Vec<(u8, RecordId, Vec<u8>)>, StorageError> {
+    active_slot_images_for_game(GameLine::Skylanders, MAX_FIGURES)
+}
+
+pub fn active_slot_images_for_game(
+    game_line: GameLine,
+    max_slots: usize,
+) -> Result<Vec<(u8, RecordId, Vec<u8>)>, StorageError> {
     with_store_mut(|store| {
         let mut images = Vec::new();
-        for slot in 0..MAX_FIGURES {
+        for slot in 0..MAX_FIGURES.min(max_slots) {
             let Some(id) = store.catalog.active_slots[slot] else {
                 continue;
             };
             let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
+            if entity.game_line != game_line {
+                continue;
+            }
             images.push((slot as u8, id, read_entity_image(store, entity)?));
         }
         Ok(images)
@@ -904,11 +914,19 @@ fn read_entity_image(store: &mut Store, entity: Entity) -> Result<Vec<u8>, Stora
 }
 
 fn generated_entity_image(entity: Entity) -> Vec<u8> {
-    let image =
-        initialize_skylanders_entity_image(entity.character_id, entity.variant_id, entity.id.0);
-    let mut out = Vec::new();
-    out.extend_from_slice(&image);
-    out
+    match entity.game_line {
+        GameLine::Skylanders => {
+            let image = initialize_skylanders_entity_image(
+                entity.character_id,
+                entity.variant_id,
+                entity.id.0,
+            );
+            let mut out = Vec::new();
+            out.extend_from_slice(&image);
+            out
+        }
+        GameLine::Infinity => Vec::new(),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

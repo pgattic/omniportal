@@ -13,6 +13,15 @@ pub const INTERRUPT_OUT_ENDPOINT: u8 = 0x01;
 pub const INTERRUPT_MAX_PACKET_SIZE: u16 = 32;
 pub const INTERRUPT_POLL_INTERVAL_MS: u8 = 1;
 
+pub const HID_GET_REPORT_REQUEST: u8 = 0x01;
+pub const HID_GET_IDLE_REQUEST: u8 = 0x02;
+pub const HID_GET_PROTOCOL_REQUEST: u8 = 0x03;
+pub const HID_SET_REPORT_REQUEST: u8 = 0x09;
+pub const HID_SET_IDLE_REQUEST: u8 = 0x0a;
+pub const HID_SET_PROTOCOL_REQUEST: u8 = 0x0b;
+pub const HID_DESCRIPTOR_TYPE: u8 = 0x21;
+pub const HID_REPORT_DESCRIPTOR_TYPE: u8 = 0x22;
+
 pub const REPORT_BYTES: usize = 32;
 pub const MAX_FIGURES: usize = 9;
 pub const FIGURE_BLOCK_BYTES: usize = 16;
@@ -25,6 +34,43 @@ pub type FigureImage = [u8; FIGURE_IMAGE_BYTES];
 pub const ACTIVATE_RESPONSE: Report = [
     0xaa, 0x15, 0x00, 0x00, 0x0f, 0x01, 0x00, 0x03, 0x02, 0x09, 0x09, 0x43, 0x20, 0x32, 0x62, 0x36,
     0x36, 0x4b, 0x34, 0x99, 0x67, 0x31, 0x93, 0x8c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
+
+// Vendor-defined HID payload: 32-byte input, output, and feature reports.
+pub const HID_REPORT_DESCRIPTOR: &[u8] = &[
+    0x06,
+    0x00,
+    0xff, // Usage Page (Vendor Defined)
+    0x09,
+    0x01, // Usage (1)
+    0xa1,
+    0x01, // Collection (Application)
+    0x15,
+    0x00, // Logical Minimum (0)
+    0x26,
+    0xff,
+    0x00, // Logical Maximum (255)
+    0x75,
+    0x08, // Report Size (8)
+    0x95,
+    REPORT_BYTES as u8, // Report Count
+    0x09,
+    0x01, // Usage (1)
+    0x81,
+    0x02, // Input (Data, Variable, Absolute)
+    0x95,
+    REPORT_BYTES as u8, // Report Count
+    0x09,
+    0x02, // Usage (2)
+    0x91,
+    0x02, // Output (Data, Variable, Absolute)
+    0x95,
+    REPORT_BYTES as u8, // Report Count
+    0x09,
+    0x03, // Usage (3)
+    0xb1,
+    0x02, // Feature (Data, Variable, Absolute)
+    0xc0, // End Collection
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +90,35 @@ pub enum FigurePosition {
 impl FigurePosition {
     const fn index(self) -> usize {
         self as usize
+    }
+
+    pub const fn from_portal_index(index: u8) -> Option<Self> {
+        match index {
+            0 => Some(Self::PlayerOne),
+            1 => Some(Self::PlayerTwo),
+            2 => Some(Self::HexagonDiscOne),
+            3 => Some(Self::PlayerOneAbilityOne),
+            4 => Some(Self::PlayerOneAbilityTwo),
+            5 => Some(Self::PlayerTwoAbilityOne),
+            6 => Some(Self::PlayerTwoAbilityTwo),
+            7 => Some(Self::HexagonDiscTwo),
+            8 => Some(Self::HexagonDiscThree),
+            _ => None,
+        }
+    }
+
+    pub const fn portal_index(self) -> u8 {
+        match self {
+            Self::PlayerOne => 0,
+            Self::PlayerTwo => 1,
+            Self::HexagonDiscOne => 2,
+            Self::PlayerOneAbilityOne => 3,
+            Self::PlayerOneAbilityTwo => 4,
+            Self::PlayerTwoAbilityOne => 5,
+            Self::PlayerTwoAbilityTwo => 6,
+            Self::HexagonDiscTwo => 7,
+            Self::HexagonDiscThree => 8,
+        }
     }
 }
 
@@ -195,6 +270,14 @@ impl InfinityBaseState {
     pub fn figure_image(&self, position: FigurePosition) -> Option<&FigureImage> {
         let figure = &self.figures[position.index()];
         figure.present.then_some(&figure.data)
+    }
+
+    pub fn figure_position_by_order(&self, order_added: u8) -> Option<FigurePosition> {
+        self.figures
+            .iter()
+            .enumerate()
+            .find(|(_, figure)| figure.present && figure.order_added == order_added)
+            .and_then(|(index, _)| figure_position_from_index(index))
     }
 
     fn push_change_response(&mut self, position: FigurePosition, removed: bool) {
