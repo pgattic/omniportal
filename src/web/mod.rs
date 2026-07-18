@@ -107,11 +107,6 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         )
         .await;
     } else if method == "POST" && path == "/api/entity/upload" {
-        println!(
-            "HTTP entity upload: query='{}', bytes={}",
-            query,
-            body.len()
-        );
         let result = if query.is_empty() {
             crate::storage::upload_entity_from_form_params(params(query, body).as_str())
         } else {
@@ -149,7 +144,6 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         )
         .await;
     } else if method == "POST" && path == "/api/entity/select" {
-        println!("HTTP entity select: '{}'", params(query, body).as_str());
         write_storage_result(
             socket,
             crate::storage::select_entity_from_params(params(query, body).as_str()),

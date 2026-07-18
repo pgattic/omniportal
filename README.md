@@ -1,7 +1,7 @@
 
 # OmniPortal
 
-A modern Skylanders portal simulator for PS3, PS4, Wii and Wii U
+An ESP32-S3 toys-to-life base emulator for Skylanders and Disney Infinity.
 
 ## ESP32-S3 Firmware
 
@@ -21,7 +21,7 @@ scripts/patch-esp-toolchain-nixos.sh
 Build the firmware:
 
 ```sh
-cargo build --release
+scripts/build-firmware.sh
 ```
 
 Run host-side unit tests:
@@ -33,10 +33,7 @@ omniportal-host-test
 Flash and monitor:
 
 ```sh
-espflash flash \
-  --partition-table partitions/esp32s3-n16r8.csv \
-  --monitor \
-  target/xtensa-esp32s3-none-elf/release/omniportal
+scripts/flash-firmware.sh /dev/ttyACM0
 ```
 
 ## Code Structure
@@ -48,9 +45,8 @@ from ESP32-S3 firmware wiring:
 * `main.rs` - thin ESP32-S3 firmware entry point
 * `figures/` - figure identity and image helpers
 * `storage/` - flash-backed catalog, records, and host-testable journal logic
-* `usb/` - portal protocol constants and packet helpers
+* `usb/` - Skylanders and Disney Infinity USB descriptors and protocol helpers
 * `web/` - HTTP parsing plus ESP32-S3 server wiring
-* `state.rs` - shared mode/selection state
 * `dhcp.rs` - ESP32-S3 DHCPv4 server for AP clients
 * `platform/esp32s3_n16r8/` - ESP32-S3 board entrypoint, WiFi, logging,
   flash adapter, heap setup, and board constants
@@ -59,11 +55,9 @@ from ESP32-S3 firmware wiring:
 Firmware-only modules are compiled for the Xtensa target. Host builds compile
 the portable library logic for tests and future tooling.
 
-The USB subsystem task is intentionally idle for now. WiFi/Web are active, and
-storage scans a flash-backed append-only journal at boot.
-
-The planned USB target behavior is documented in
-[`docs/usb-target.md`](docs/usb-target.md).
+USB mode is selected at boot from the persisted device config. Changing mode in
+the web UI requires resetting or fully power-cycling the ESP32-S3 so the Wii
+sees the new USB descriptor.
 
 ## WiFi AP Smoke Test
 
@@ -86,8 +80,8 @@ Manual fallback settings:
 * gateway/router: `192.168.4.1`
 * DNS: leave blank or use `192.168.4.1`
 
-After connecting, the root page should show `Hello from ESP32-S3`, and
-`/status` should return hardcoded JSON.
+After connecting, the root page should show the OmniPortal control UI, and
+`/status` should return current mode, active placement, and storage JSON.
 
 ## Storage Smoke Test
 
@@ -104,7 +98,7 @@ OmniPortal storage partition.
 Useful read endpoints:
 
 * `GET /api/library` - list identities and collection entities
-* `GET /api/catalog` - list built-in Skylanders catalog entries
+* `GET /api/catalog` - list built-in catalog entries
 * `GET /api/identity/1.json` - download an identity sidecar
 * `GET /api/entity/1.bin` - download an entity image
 
@@ -117,6 +111,7 @@ curl -X POST -d 'source_id=1&name=Second+Save+Slot' 'http://192.168.4.1/api/enti
 curl -X POST -d 'id=1' 'http://192.168.4.1/api/entity/select'
 curl -X POST -d 'id=1&name=Renamed+Trigger+Happy' 'http://192.168.4.1/api/entity/rename'
 curl -X POST 'http://192.168.4.1/api/entity/clear-active'
+curl -X POST -d 'mode=infinity' 'http://192.168.4.1/api/mode/set'
 curl -X POST 'http://192.168.4.1/api/storage/compact'
 ```
 
@@ -132,16 +127,14 @@ Delete endpoints use POST as well:
 curl -X POST -d 'id=1' 'http://192.168.4.1/api/entity/delete'
 ```
 
-Collection entities are created from the built-in Skylanders catalog. Characters,
-traps, creation crystals, vehicles, and trophies get mutable 1 KiB placeholder
-images for now. Items and level pieces are stored as static-generated collection
-entries and synthesize their placeholder image only when downloaded or cloned.
-The placeholder images prove durable storage and exact download plumbing, but
-they are not yet valid game images.
+Collection entities are created from built-in catalogs or imported from raw
+dumps. Skylanders entities use 1 KiB MIFARE images. Disney Infinity entities use
+320-byte raw figure images. Some non-character toys are static collection items
+when the game line does not need mutable save data on the toy.
 
 The built-in Skylanders catalog is stored as typed Rust constants in
-`src/figures/catalog.rs`. The character IDs, variant IDs, names, and categories
-were normalized from community reference material, primarily:
+`src/figures/skylanders/catalog.rs`. The character IDs, variant IDs, names, and
+categories were normalized from community reference material, primarily:
 
 * <https://github.com/Texthead1/Skylander-IDs>
 * <https://github.com/NefariousTechSupport/Runes/blob/master/Docs/SkylanderFormat.md>
@@ -173,12 +166,21 @@ Useful signs:
 * `10c4:ea60` / `CP210x`, `1a86:55d4` / `CH343`, or similar means that connector
   is a USB-UART bridge, not native USB device mode.
 
-The firmware now enumerates as a Skylanders Portal of Power-compatible HID
-device on the native USB connector:
+The firmware enumerates as either a Skylanders Portal of Power-compatible HID
+device or a Disney Infinity Base-compatible HID device on the native USB
+connector, depending on the saved USB mode at boot.
+
+Skylanders mode:
 
 * VID/PID: `1430:0150`
 * product string: `Portal of Power`
 * interface: vendor-defined HID with 64-byte interrupt IN/OUT endpoints
+
+Disney Infinity mode:
+
+* VID/PID: `0e6f:0129`
+* product string: `Disney Infinity Base`
+* interface: vendor-defined HID with 32-byte interrupt IN/OUT endpoints
 
 After flashing, plug the board's native USB connector into the host and run:
 
@@ -190,3 +192,10 @@ The probe verifies that the device enumerates with the Skylanders VID/PID, that
 the interrupt IN endpoint is present, that a HID `SET_REPORT` activate command
 queues an `A 01 ff 77` response, and that `GET_REPORT` returns an `S` status
 report.
+
+For Disney Infinity mode, switch modes, fully reset or power-cycle the ESP32-S3,
+then run:
+
+```sh
+sudo python scripts/probe-infinity-base.py
+```
