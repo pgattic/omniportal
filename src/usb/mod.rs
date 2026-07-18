@@ -1,5 +1,9 @@
 #[cfg(target_arch = "xtensa")]
 mod device;
+#[cfg(target_arch = "xtensa")]
+mod infinity_device;
+#[cfg(target_arch = "xtensa")]
+mod skylanders_device;
 
 pub mod infinity;
 pub mod skylanders;
