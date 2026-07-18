@@ -887,12 +887,13 @@ pub fn format_storage() -> Result<String, StorageError> {
             )
             .map_err(|_| StorageError::Flash)?;
         store.catalog = Catalog::new();
+        let generation = store.catalog.next_generation();
         append_record(
             &mut store.flash,
             &mut store.catalog,
             RECORD_KIND_FORMAT_MARKER,
             0,
-            1,
+            generation,
             b"omniportal-storage-v1",
         )?;
         Ok(String::from("{\"formatted\":true}\n"))
@@ -2490,6 +2491,29 @@ mod tests {
         assert_eq!(rebuilt.next_record_id, 9);
         assert_eq!(rebuilt.next_blob_id, 3);
         assert_eq!(rebuilt.next_generation, 6);
+    }
+
+    #[test]
+    fn formatted_storage_resets_usb_mode_to_factory_default() {
+        let mut flash = StorageFlash::new();
+        let mut catalog = Catalog::new();
+        catalog.usb_mode = GameLine::Infinity;
+        let format_generation = catalog.next_generation();
+        append_record(
+            &mut flash,
+            &mut catalog,
+            RECORD_KIND_FORMAT_MARKER,
+            0,
+            format_generation,
+            b"omniportal-storage-v1",
+        )
+        .unwrap();
+        let mut rebuilt = Catalog::new();
+        scan_flash(&mut flash, &mut rebuilt).unwrap();
+
+        assert_eq!(rebuilt.usb_mode, GameLine::Skylanders);
+        assert_eq!(rebuilt.active_slots, [None; MAX_FIGURES]);
+        assert_eq!(rebuilt.next_generation, 2);
     }
 
     #[test]
