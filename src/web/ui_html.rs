@@ -13,6 +13,8 @@ section{background:#fff;border:1px solid #d8d8d8;border-radius:6px;margin:12px 0
 form{display:grid;gap:8px;margin:8px 0}
 label{display:grid;gap:4px;font-size:13px}
 input,select,button{font:inherit;padding:8px;border:1px solid #bbb;border-radius:4px;background:#fff}
+input,select{box-sizing:border-box;min-width:0;max-width:100%}
+label>input,label>select{width:100%}
 button{background:#ececec}
 button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
@@ -22,6 +24,11 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 .item strong{display:block}
 .meta{font-size:12px;color:#555;word-break:break-word}
 .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.actions select{width:auto;min-width:120px;max-width:100%}
+.slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
+.slot{border:1px solid #ddd;border-radius:4px;padding:8px;background:#fafafa;display:grid;gap:8px}
+.slot.empty{background:#fff}
+.slot-title{font-weight:700}
 #message{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px;background:#111;color:#eee;padding:8px;border-radius:4px}
 </style>
 </head>
@@ -34,8 +41,15 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <div id="status">Loading...</div>
 <div class="row">
 <button onclick="refreshAll()">Refresh</button>
-<button onclick="clearActive()">Clear Active</button>
 <button onclick="compactStorage()">Compact Storage</button>
+</div>
+</section>
+
+<section>
+<h2>Portal of Power</h2>
+<div id="slots" class="slots"></div>
+<div class="actions">
+<button onclick="clearActive()">Clear All Slots</button>
 </div>
 </section>
 
@@ -87,6 +101,7 @@ let library = {identities:[], entities:[], active_entity_id:null, active_slots:[
 let catalog = [];
 let catalogTotal = 0;
 let catalogTimer = 0;
+const portalSlotCount = 8;
 
 const $ = id => document.getElementById(id);
 const enc = value => encodeURIComponent(value == null ? "" : value);
@@ -114,14 +129,13 @@ async function refreshAll() {
 function renderStatus(status) {
   const storage = status.storage || {};
   const slots = status.active_slots || [];
-  const slotText = slots.length
-    ? slots.map(slot => `${Number(slot.slot) + 1}: #${slot.entity_id}`).join(", ")
-    : "none";
+  const used = storage.used_bytes || 0;
+  const capacity = storage.capacity_bytes || 0;
   $("status").innerHTML =
     `<div>Mode: ${status.mode || "unknown"}</div>` +
-    `<div>Portal slots: ${slotText}</div>` +
+    `<div>Occupied slots: ${slots.length}</div>` +
     `<div>Records: ${storage.entities || 0} entities</div>` +
-    `<div>Storage: ${storage.used_bytes || 0} / ${storage.capacity_bytes || 0} bytes</div>` +
+    `<div>Storage: ${used} / ${capacity} bytes (${storagePercent(used, capacity)})</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
 }
 
@@ -147,6 +161,7 @@ function renderCatalog() {
 }
 
 function renderLibrary() {
+  renderSlots();
   renderEntities();
 }
 
@@ -161,23 +176,82 @@ function renderEntities() {
     const slots = activeSlots
       .filter(slot => slot.entity_id === item.id)
       .map(slot => Number(slot.slot) + 1);
-    const active = slots.length ? ` slots ${slots.join(",")}` : "";
+    const active = slots.length ? " (active)" : "";
     const download = `<a href="/api/entity/${item.id}.bin">Download</a>`;
-    const clone = item.data_mode === "mutable-image"
-      ? `<button onclick="cloneEntity(${item.id})">Clone</button>`
-      : `<button onclick="cloneEntity(${item.id})">Create mutable copy</button>`;
-    const remove = slots.map(slot => `<button onclick="removeSlot(${slot - 1})">Remove slot ${slot}</button>`).join("");
+    const clone = `<button onclick="cloneEntity(${item.id})">Clone</button>`;
+    const place_remove = slots.length
+      ? slots.map(slot => `<button onclick="removeSlot(${slot - 1})">Remove from Portal</button>`).join("")
+      : `<button onclick="placeEntityFirstAvailable(${item.id})">Place on Portal</button>`;
     return itemShell(
-      `#${item.id} ${item.name}${active}`,
-      `${item.kind}, ${item.data_mode}, ${item.image_len} bytes, crc32 ${item.crc32}`,
-      `<button onclick="placeEntity(${item.id})">Place</button>` +
-      remove +
+      `#${item.id} ${escapeHtml(item.name)}${active}`,
+      entityMeta(item),
+      place_remove +
       clone +
       `<button onclick="renameRecord('entity',${item.id})">Rename</button>` +
       `<button onclick="deleteRecord('entity',${item.id})">Delete</button>` +
       download
     );
   }).join("") || "<div class='meta'>No collection entities.</div>";
+}
+
+function renderSlots() {
+  const entities = library.entities || [];
+  const activeSlots = library.active_slots || [];
+  const sortedEntities = [...entities].sort((left, right) => left.name.localeCompare(right.name));
+  $("slots").innerHTML = Array.from({length: portalSlotCount}, (_, slot) => {
+    const active = activeSlots.find(item => Number(item.slot) === slot);
+    const entity = active ? entities.find(item => item.id === active.entity_id) : null;
+    if (entity) {
+      return `<div class="slot">` +
+        `<div class="slot-title">Slot ${slot + 1}</div>` +
+        `<div>#${entity.id} ${escapeHtml(entity.name)}</div>` +
+        `<div class="meta">${entityMeta(entity)}</div>` +
+        `<div class="actions">` +
+        `<button onclick="removeSlot(${slot})">Remove</button>` +
+        `<select id="slotSelect${slot}">${entityOptions(sortedEntities, entity.id)}</select>` +
+        `<button onclick="placeSlotFromSelect(${slot}, 'slotSelect${slot}')">Replace</button>` +
+        `</div></div>`;
+    }
+    return `<div class="slot empty">` +
+      `<div class="slot-title">Slot ${slot + 1}</div>` +
+      `<div class="meta">Empty</div>` +
+      `<div class="actions">` +
+      `<select id="slotSelect${slot}">${entityOptions(sortedEntities, null)}</select>` +
+      `<button onclick="placeSlotFromSelect(${slot}, 'slotSelect${slot}')" ${sortedEntities.length ? "" : "disabled"}>Place</button>` +
+      `</div></div>`;
+  }).join("");
+}
+
+function entityOptions(entities, selectedId) {
+  return entities.map(item => {
+    const selected = item.id === selectedId ? " selected" : "";
+    return `<option value="${item.id}"${selected}>#${item.id} ${escapeHtml(item.name)}</option>`;
+  }).join("");
+}
+
+function firstEmptySlot(activeSlots) {
+  for (let slot = 0; slot < portalSlotCount; slot++) {
+    if (!activeSlots.some(item => Number(item.slot) === slot)) return slot;
+  }
+  return null;
+}
+
+function entityMeta(item) {
+  const figure = item.figure || `ID ${item.character_id}`;
+  return `${escapeHtml(figure)}, ${item.kind}, ${item.game}`;
+}
+
+function storagePercent(used, capacity) {
+  if (!capacity) return "0%";
+  return `${((used / capacity) * 100).toFixed(1)}%`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 $("catalogKind").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
@@ -214,15 +288,28 @@ async function post(path, params = "") {
   await refreshAll();
 }
 
-async function placeEntity(id) {
-  const slot = prompt("Portal slot number", "1");
-  if (!slot) return;
-  const index = Number(slot) - 1;
-  if (!Number.isInteger(index) || index < 0 || index > 15) {
-    say("slot must be between 1 and 16");
+async function placeEntityInSlot(id, slot) {
+  const index = Number(slot);
+  if (!Number.isInteger(index) || index < 0 || index >= portalSlotCount) {
+    say(`slot must be between 1 and ${portalSlotCount}`);
     return;
   }
   await post("/api/entity/select", `id=${id}&slot=${index}`);
+}
+
+async function placeEntityFirstAvailable(id) {
+  const slot = firstEmptySlot(library.active_slots || []);
+  if (slot == null) {
+    say("no portal slots are empty");
+    return;
+  }
+  await placeEntityInSlot(id, slot);
+}
+
+async function placeSlotFromSelect(slot, selectId) {
+  const id = Number($(selectId).value);
+  if (!Number.isInteger(id)) return;
+  await placeEntityInSlot(id, slot);
 }
 
 async function removeSlot(slot) {

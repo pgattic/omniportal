@@ -1045,10 +1045,15 @@ impl Catalog {
                 out.push(',');
             }
             first = false;
+            let figure_name = entity
+                .catalog_index
+                .and_then(skylanders_catalog_entry)
+                .map(|entry| entry.name);
             out.push_str(&format!(
-                "{{\"id\":{},\"name\":\"{}\",\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
+                "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
                 entity.id.0,
                 json_escape(entity.name.as_str()),
+                option_str_json(figure_name),
                 option_record_id_json(entity.parent_identity_id),
                 option_u16_json(entity.catalog_index),
                 entity.game_line.wire_name(),
@@ -1660,6 +1665,12 @@ fn option_record_id_json(value: Option<RecordId>) -> String {
 fn option_blob_id_json(value: Option<BlobId>) -> String {
     value
         .map(|value| format!("{}", value.0))
+        .unwrap_or_else(|| String::from("null"))
+}
+
+fn option_str_json(value: Option<&str>) -> String {
+    value
+        .map(|value| format!("\"{}\"", json_escape(value)))
         .unwrap_or_else(|| String::from("null"))
 }
 
