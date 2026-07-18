@@ -1,14 +1,16 @@
 use core::cell::RefCell;
 
 use crate::config;
-use crate::figures::catalog::{skylanders_catalog_entry, FigureCatalogEntry, SKYLANDERS_CATALOG};
-use crate::figures::formats::ImageFormat;
-use crate::figures::init::{
+use crate::domain::{FigureKind, GameLine, ImageFormat};
+use crate::figures::formats::SKYLANDERS_IMAGE_BYTES;
+use crate::figures::skylanders::catalog::{
+    skylanders_catalog_entry, FigureCatalogEntry, SKYLANDERS_CATALOG,
+};
+use crate::figures::skylanders::crypto::validate_skylanders_mifare_image;
+use crate::figures::skylanders::image::{
     initialize_mutable_skylanders_entity_image, initialize_skylanders_entity_image,
     rekey_skylanders_entity_image,
 };
-use crate::figures::skylanders_crypto::validate_skylanders_mifare_image;
-use crate::figures::{FigureKind, GameLine};
 #[cfg(target_arch = "xtensa")]
 use crate::platform::println;
 #[cfg(target_arch = "xtensa")]
@@ -845,7 +847,7 @@ fn initialize_new_entity_image(
     character_id: u32,
     variant_id: Option<u32>,
     entity_id: u32,
-) -> [u8; crate::figures::formats::SKYLANDERS_IMAGE_BYTES] {
+) -> [u8; SKYLANDERS_IMAGE_BYTES] {
     if entity_kind_is_mutable(kind) {
         initialize_mutable_skylanders_entity_image(character_id, variant_id, entity_id, kind)
     } else {
@@ -1750,7 +1752,7 @@ fn option_str_json(value: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::figures::skylanders_crypto::decrypt_figure;
+    use crate::figures::skylanders::crypto::decrypt_figure;
     use crate::usb::skylanders::{handle_command, PortalState, PLACEMENT_STATUS_HOLD_REPORTS};
 
     fn test_identity() -> CharacterIdentity {
@@ -1999,6 +2001,29 @@ mod tests {
         catalog.delete_entity(entity.id).unwrap();
         assert_eq!(catalog.entity_count(), 0);
         assert_eq!(catalog.active_entity_id(), None);
+    }
+
+    #[test]
+    fn storage_entities_project_to_game_specific_domain_payloads() {
+        let skylanders = test_entity().domain_entity();
+        let crate::domain::EntityPayload::Skylanders(payload) = skylanders.payload else {
+            panic!("expected skylanders payload");
+        };
+        assert_eq!(skylanders.id, 8);
+        assert_eq!(payload.figure_id, 21);
+        assert_eq!(payload.variant_id, Some(3));
+
+        let mut infinity = test_entity();
+        infinity.game_line = GameLine::Infinity;
+        infinity.character_id = 0x1234_5678;
+        infinity.variant_id = None;
+        infinity.image_format = ImageFormat::InfinityUnknown;
+        let infinity = infinity.domain_entity();
+        let crate::domain::EntityPayload::Infinity(payload) = infinity.payload else {
+            panic!("expected infinity payload");
+        };
+        assert_eq!(payload.figure_number, 0x1234_5678);
+        assert_eq!(payload.image_format, ImageFormat::InfinityUnknown);
     }
 
     #[test]

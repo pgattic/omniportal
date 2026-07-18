@@ -145,7 +145,7 @@ async function loadCatalog() {
   const kind = $("catalogKind").value;
   const search = $("catalogSearch").value.trim();
   const loaded = await api(`/api/catalog?kind=${enc(kind)}&q=${enc(search)}&limit=30`);
-  catalog = loaded.skylanders || [];
+  catalog = loaded.figures || loaded.skylanders || [];
   catalogTotal = loaded.total || catalog.length;
   renderCatalog();
 }

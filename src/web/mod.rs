@@ -182,6 +182,7 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
     const DEFAULT_LIMIT: usize = 30;
     const MAX_LIMIT: usize = 40;
 
+    let game = query_param(query, "game").unwrap_or_else(|| String::from("skylanders"));
     let kind = query_param(query, "kind");
     let search = query_param(query, "q").unwrap_or_default();
     let offset = query_param(query, "offset")
@@ -192,21 +193,34 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
         .unwrap_or(DEFAULT_LIMIT)
         .min(MAX_LIMIT);
 
+    if game == "infinity" {
+        let body = format!(
+            "{{\"game\":\"infinity\",\"offset\":{},\"limit\":{},\"total\":0,\"figures\":[]}}\n",
+            offset, limit
+        );
+        write_text(socket, "200 OK", "application/json", body.as_str()).await;
+        return;
+    }
+    if game != "skylanders" {
+        write_text(socket, "400 Bad Request", "text/plain", "bad request\n").await;
+        return;
+    }
+
     let mut total = 0usize;
 
-    for entry in crate::figures::catalog::SKYLANDERS_CATALOG {
+    for entry in crate::figures::skylanders::catalog::SKYLANDERS_CATALOG {
         if catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
             total += 1;
         }
     }
 
     let mut body = format!(
-        "{{\"offset\":{},\"limit\":{},\"total\":{},\"skylanders\":[",
+        "{{\"game\":\"skylanders\",\"offset\":{},\"limit\":{},\"total\":{},\"figures\":[",
         offset, limit, total
     );
     let mut emitted = 0usize;
     let mut seen = 0usize;
-    for entry in crate::figures::catalog::SKYLANDERS_CATALOG {
+    for entry in crate::figures::skylanders::catalog::SKYLANDERS_CATALOG {
         if !catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
             continue;
         }
@@ -221,25 +235,53 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
             body.push(',');
         }
         emitted += 1;
-        body.push_str(&format!(
-            "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"character_id\":{},\"variant_id\":{}}}",
-            entry.index,
-            entry.game_line.wire_name(),
-            entry.kind.wire_name(),
-            entry.series,
-            entry.name,
-            entry.character_id,
-            entry.variant_id
-        ));
+        push_skylanders_catalog_entry(&mut body, entry);
     }
 
+    body.push_str("],\"skylanders\":[");
+    emitted = 0;
+    seen = 0;
+    for entry in crate::figures::skylanders::catalog::SKYLANDERS_CATALOG {
+        if !catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
+            continue;
+        }
+        if seen < offset {
+            seen += 1;
+            continue;
+        }
+        if emitted >= limit {
+            break;
+        }
+        if emitted > 0 {
+            body.push(',');
+        }
+        emitted += 1;
+        push_skylanders_catalog_entry(&mut body, entry);
+    }
     body.push_str("]}\n");
     write_text(socket, "200 OK", "application/json", body.as_str()).await;
 }
 
 #[cfg(target_arch = "xtensa")]
+fn push_skylanders_catalog_entry(
+    body: &mut String,
+    entry: &crate::figures::skylanders::catalog::FigureCatalogEntry,
+) {
+    body.push_str(&format!(
+        "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"character_id\":{},\"variant_id\":{}}}",
+        entry.index,
+        entry.game_line.wire_name(),
+        entry.kind.wire_name(),
+        entry.series,
+        entry.name,
+        entry.character_id,
+        entry.variant_id
+    ));
+}
+
+#[cfg(target_arch = "xtensa")]
 fn catalog_entry_matches(
-    entry: &crate::figures::catalog::FigureCatalogEntry,
+    entry: &crate::figures::skylanders::catalog::FigureCatalogEntry,
     kind: Option<&str>,
     search: &str,
 ) -> bool {

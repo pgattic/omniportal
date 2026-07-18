@@ -653,14 +653,16 @@ mod tests {
 
     #[test]
     fn generated_blank_image_decrypts_to_itself() {
-        let image = crate::figures::init::initialize_skylanders_entity_image(21, None, 1);
+        let image =
+            crate::figures::skylanders::image::initialize_skylanders_entity_image(21, None, 1);
 
         assert_eq!(decrypt_figure(&image), image);
     }
 
     #[test]
     fn figure_encrypt_decrypt_round_trips_data_blocks() {
-        let mut plaintext = crate::figures::init::initialize_skylanders_entity_image(21, None, 1);
+        let mut plaintext =
+            crate::figures::skylanders::image::initialize_skylanders_entity_image(21, None, 1);
 
         for block_index in 8..BLOCK_COUNT {
             if is_plaintext_block(block_index) {
