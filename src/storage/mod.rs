@@ -3,7 +3,10 @@ use core::cell::RefCell;
 use crate::config;
 use crate::figures::catalog::skylanders_catalog_entry;
 use crate::figures::formats::ImageFormat;
-use crate::figures::init::{initialize_skylanders_entity_image, rekey_skylanders_entity_image};
+use crate::figures::init::{
+    initialize_mutable_skylanders_entity_image, initialize_skylanders_entity_image,
+    rekey_skylanders_entity_image,
+};
 use crate::figures::{FigureKind, GameLine};
 #[cfg(target_arch = "xtensa")]
 use crate::platform::println;
@@ -245,7 +248,8 @@ pub fn create_entity_from_query(query: &str) -> Result<String, StorageError> {
             .identity(RecordId(identity_id))
             .ok_or(StorageError::NotFound)?;
         let entity_id = store.catalog.next_record_id();
-        let image = initialize_skylanders_entity_image(
+        let image = initialize_new_entity_image(
+            identity.kind,
             identity.character_id,
             identity.variant_id,
             entity_id.0,
@@ -300,7 +304,8 @@ pub fn create_entity_from_catalog_params(params: &str) -> Result<String, Storage
             None
         };
         let entity_id = store.catalog.next_record_id();
-        let image = initialize_skylanders_entity_image(entry.character_id, variant_id, entity_id.0);
+        let image =
+            initialize_new_entity_image(entry.kind, entry.character_id, variant_id, entity_id.0);
         let (data_mode, blob_id, image_len, image_crc32) = if entity_kind_is_mutable(entry.kind) {
             let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image)?;
             (
@@ -778,6 +783,19 @@ fn generated_entity_image(entity: Entity) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&image);
     out
+}
+
+fn initialize_new_entity_image(
+    kind: FigureKind,
+    character_id: u32,
+    variant_id: Option<u32>,
+    entity_id: u32,
+) -> [u8; crate::figures::formats::SKYLANDERS_IMAGE_BYTES] {
+    if entity_kind_is_mutable(kind) {
+        initialize_mutable_skylanders_entity_image(character_id, variant_id, entity_id, kind)
+    } else {
+        initialize_skylanders_entity_image(character_id, variant_id, entity_id)
+    }
 }
 
 fn entity_kind_is_mutable(kind: FigureKind) -> bool {
@@ -1677,6 +1695,7 @@ fn option_str_json(value: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::figures::skylanders_crypto::decrypt_figure;
 
     fn test_identity() -> CharacterIdentity {
         CharacterIdentity {
@@ -1814,6 +1833,24 @@ mod tests {
         assert_eq!(catalog.active_slots[0], None);
         assert_eq!(catalog.active_slots[1], Some(RecordId(2)));
         assert_eq!(catalog.active_slots[2], Some(RecordId(1)));
+    }
+
+    #[test]
+    fn new_mutable_entity_images_include_encrypted_fresh_save_data() {
+        let image = initialize_new_entity_image(FigureKind::Character, 21, None, 1);
+        let plaintext = decrypt_figure(&image);
+
+        assert_ne!(image, plaintext);
+        assert_eq!(&plaintext[0x10..0x12], &21u16.to_le_bytes());
+        assert_eq!(&plaintext[0x80 + 0x5a..0x80 + 0x5c], &1u16.to_le_bytes());
+    }
+
+    #[test]
+    fn new_static_entity_images_keep_dolphin_create_layout_without_save_blob() {
+        let image = initialize_new_entity_image(FigureKind::Item, 230, None, 1);
+
+        assert_eq!(decrypt_figure(&image), image);
+        assert_eq!(&image[0x10..0x12], &230u16.to_le_bytes());
     }
 
     #[test]

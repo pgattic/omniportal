@@ -766,6 +766,110 @@ mod tests {
     }
 
     #[test]
+    fn wii_trace_empty_portal_then_player_one_placement() {
+        let mut state = PortalState::new();
+        let mut image = [0; FIGURE_IMAGE_BYTES];
+        for (index, byte) in image.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+
+        replay_trace(
+            &mut state,
+            &[
+                TraceStep::new(&[b'A', 0x01], &[b'A', 0x01, 0xff, 0x77], true),
+                TraceStep::new(&[b'R', 0x00], &[b'R', 0x02, 0x1b], true),
+                TraceStep::new(&[b'S'], &[b'S', 0x00, 0x00, 0x00, 0x00, 0x00, 0x01], false),
+                TraceStep::new(&[b'C', 0xff, 0xff, 0xff], &[b'C', 0xff, 0xff, 0xff], false),
+            ],
+        );
+
+        assert!(state.load_entity_into_slot(0, 100, &image));
+        assert_eq!(
+            status_for_slot(&handle_command(&mut state, &[b'S']).unwrap().report, 0),
+            SlotStatus::Added
+        );
+        advance_numbered_slot_status(&mut state, 0, SlotStatus::Ready);
+
+        replay_trace(
+            &mut state,
+            &[
+                TraceStep::new(&[b'Q', 0x10, 0x00], &[b'Q', 0x10, 0x00], true),
+                TraceStep::new(&[b'Q', 0x10, 0x02], &[b'Q', 0x10, 0x02], true),
+            ],
+        );
+        assert_eq!(
+            &handle_command(&mut state, &[b'Q', 0x10, 0x02])
+                .unwrap()
+                .report[3..19],
+            &image[32..48]
+        );
+    }
+
+    #[test]
+    fn wii_trace_two_player_placement_keeps_both_figures_ready() {
+        let mut state = PortalState::new();
+        let image_one = [0x11; FIGURE_IMAGE_BYTES];
+        let image_two = [0x22; FIGURE_IMAGE_BYTES];
+
+        replay_trace(
+            &mut state,
+            &[TraceStep::new(
+                &[b'A', 0x01],
+                &[b'A', 0x01, 0xff, 0x77],
+                true,
+            )],
+        );
+
+        assert!(state.load_entity_into_slot(0, 100, &image_one));
+        advance_numbered_slot_status(&mut state, 0, SlotStatus::Ready);
+        assert_eq!(
+            status_for_slot(&state.next_status_report(), 0),
+            SlotStatus::Ready
+        );
+
+        assert!(state.load_entity_into_slot(1, 200, &image_two));
+        assert_eq!(
+            status_for_slot(&state.next_status_report(), 1),
+            SlotStatus::Added
+        );
+        advance_numbered_slot_status(&mut state, 1, SlotStatus::Ready);
+
+        let status = handle_command(&mut state, &[b'S']).unwrap().report;
+        assert_eq!(status_for_slot(&status, 0), SlotStatus::Ready);
+        assert_eq!(status_for_slot(&status, 1), SlotStatus::Ready);
+
+        let query_one = handle_command(&mut state, &[b'Q', 0x10, 0x00]).unwrap();
+        let query_two = handle_command(&mut state, &[b'Q', 0x11, 0x00]).unwrap();
+        assert_eq!(&query_one.report[..3], &[b'Q', 0x10, 0x00]);
+        assert_eq!(&query_two.report[..3], &[b'Q', 0x11, 0x00]);
+        assert_eq!(&query_one.report[3..19], &[0x11; FIGURE_BLOCK_BYTES]);
+        assert_eq!(&query_two.report[3..19], &[0x22; FIGURE_BLOCK_BYTES]);
+    }
+
+    #[test]
+    fn wii_trace_remove_and_readd_replays_physical_cycle() {
+        let mut state = PortalState::new();
+        let image = [0x33; FIGURE_IMAGE_BYTES];
+
+        assert!(state.load_entity_into_slot(0, 100, &image));
+        advance_numbered_slot_status(&mut state, 0, SlotStatus::Ready);
+
+        state.clear_slot(0);
+        advance_numbered_slot_status(&mut state, 0, SlotStatus::Removing);
+        advance_numbered_slot_status(&mut state, 0, SlotStatus::Removed);
+
+        assert!(state.load_entity_into_slot(0, 100, &image));
+        advance_numbered_slot_status(&mut state, 0, SlotStatus::Added);
+        advance_numbered_slot_status(&mut state, 0, SlotStatus::Ready);
+        assert_eq!(
+            &handle_command(&mut state, &[b'Q', 0x10, 0x00])
+                .unwrap()
+                .report[3..19],
+            &[0x33; FIGURE_BLOCK_BYTES]
+        );
+    }
+
+    #[test]
     fn replacing_loaded_entity_replays_physical_placement_cycle() {
         let mut state = PortalState::new();
         let image = [0; FIGURE_IMAGE_BYTES];
@@ -779,6 +883,35 @@ mod tests {
         advance_slot_status(&mut state, SlotStatus::Removed);
         advance_slot_status(&mut state, SlotStatus::Added);
         advance_slot_status(&mut state, SlotStatus::Ready);
+    }
+
+    struct TraceStep<'a> {
+        command: &'a [u8],
+        response_prefix: &'a [u8],
+        queue_report: bool,
+    }
+
+    impl<'a> TraceStep<'a> {
+        const fn new(command: &'a [u8], response_prefix: &'a [u8], queue_report: bool) -> Self {
+            Self {
+                command,
+                response_prefix,
+                queue_report,
+            }
+        }
+    }
+
+    fn replay_trace(state: &mut PortalState, steps: &[TraceStep<'_>]) {
+        for step in steps {
+            let response = handle_command(state, step.command).expect("trace command is handled");
+            assert_eq!(response.queue_report, step.queue_report);
+            assert_eq!(
+                &response.report[..step.response_prefix.len()],
+                step.response_prefix,
+                "unexpected response for command {:?}",
+                step.command
+            );
+        }
     }
 
     fn advance_slot_status(state: &mut PortalState, expected: SlotStatus) {
