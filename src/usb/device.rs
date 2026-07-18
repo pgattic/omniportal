@@ -55,8 +55,11 @@ pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'s
         .build();
 
     loop {
+        class.poll_active_entity();
+        class.flush_dirty_entity(false);
+
         if usb_dev.poll(&mut [&mut class]) {
-            class.poll();
+            class.poll_usb();
         }
 
         Timer::after(Duration::from_millis(1)).await;
@@ -93,9 +96,13 @@ pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'s
         .build();
 
     loop {
+        class.poll_active_entity();
+        class.flush_dirty_entities(false);
+
         if usb_dev.poll(&mut [&mut class]) {
-            class.poll();
+            class.poll_usb();
         }
+        class.poll_in_endpoint();
 
         Timer::after(Duration::from_millis(1)).await;
     }
@@ -148,11 +155,8 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         }
     }
 
-    fn poll(&mut self) {
-        self.poll_active_entity();
+    fn poll_usb(&mut self) {
         self.poll_out_endpoint();
-        self.poll_in_endpoint();
-        self.flush_dirty_entity(false);
     }
 
     fn poll_out_endpoint(&mut self) {
@@ -417,11 +421,9 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
         }
     }
 
-    fn poll(&mut self) {
-        self.poll_active_entity();
+    fn poll_usb(&mut self) {
         self.poll_out_endpoint();
         self.poll_in_endpoint();
-        self.flush_dirty_entities(false);
     }
 
     fn poll_out_endpoint(&mut self) {
@@ -465,6 +467,16 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
             0x00 => {}
             0xaa | 0xab => {
                 if let Some(change) = self.state.pop_change_response() {
+                    println!(
+                        "Disney Infinity USB sending change report: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                        change[0],
+                        change[1],
+                        change[2],
+                        change[3],
+                        change[4],
+                        change[5],
+                        change[6]
+                    );
                     self.push_report_front(change);
                 }
             }
@@ -472,6 +484,15 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
                 let command = report[2];
                 let order_added = report[4];
                 if let Some(response) = infinity::handle_command_packet(&mut self.state, report) {
+                    println!(
+                        "Disney Infinity USB cmd=0x{:02x} seq=0x{:02x} rsp={:02x} {:02x} {:02x} {:02x}",
+                        command,
+                        report[3],
+                        response.response[0],
+                        response.response[1],
+                        response.response[2],
+                        response.response[3]
+                    );
                     self.push_report(response.echo);
                     self.push_report(response.response);
                     if command == 0xa3 {
