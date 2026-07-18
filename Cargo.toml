@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [features]
-default = ["usb-skylanders"]
+default = []
 usb-skylanders = []
 usb-infinity = []
 

@@ -42,6 +42,11 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <h2>Status</h2>
 <div id="status">Loading...</div>
 <div class="row">
+<label>USB Mode<select id="modeSelect">
+<option value="skylanders">Skylanders</option>
+<option value="infinity">Disney Infinity</option>
+</select></label>
+<button onclick="switchMode()">Switch Mode</button>
 <button onclick="refreshAll()">Refresh</button>
 <button onclick="compactStorage()">Compact Storage</button>
 </div>
@@ -145,6 +150,7 @@ async function refreshAll() {
 
 function renderStatus(status) {
   currentMode = status.mode || "skylanders";
+  $("modeSelect").value = currentMode;
   const storage = status.storage || {};
   const slots = status.active_slots || [];
   const used = storage.used_bytes || 0;
@@ -155,6 +161,17 @@ function renderStatus(status) {
     `<div>Records: ${storage.entities || 0} entities</div>` +
     `<div>Storage: ${used} / ${capacity} bytes (${storagePercent(used, capacity)})</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
+}
+
+async function switchMode() {
+  const mode = $("modeSelect").value;
+  const result = await api("/api/mode/set", {method:"POST", body:`mode=${enc(mode)}`});
+  if (result.reboot_required) {
+    say(`${result.mode} mode saved. Reset or reconnect the ESP32 for USB mode to change.`);
+  } else {
+    say(`${result.mode} mode is already active.`);
+  }
+  await refreshAll();
 }
 
 async function loadCatalog() {

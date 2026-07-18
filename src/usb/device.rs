@@ -12,24 +12,28 @@ use usb_device::{
     prelude::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
 };
 
-#[cfg(not(feature = "usb-infinity"))]
-use crate::usb::skylanders;
-#[cfg(feature = "usb-infinity")]
-use crate::{domain::GameLine, usb::infinity};
 use crate::{
+    domain::GameLine,
     platform::println,
     storage::{self, records::RecordId},
+    usb::{infinity, skylanders},
 };
 
 const REPORT_QUEUE_LEN: usize = 32;
 const STORAGE_POLL_TICKS: u8 = 50;
-#[cfg(feature = "usb-infinity")]
 const INFINITY_CHANGE_REPORT_REPEATS: usize = 4;
 const STORAGE_WRITE_DEBOUNCE: Duration =
     Duration::from_millis(crate::storage::wear::DEFAULT_COMMIT_DEBOUNCE_MS as u64);
-#[cfg(not(feature = "usb-infinity"))]
+
 #[embassy_executor::task]
 pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'static>) {
+    match storage::usb_mode() {
+        GameLine::Skylanders => run_skylanders(usb0, usb_dp, usb_dm).await,
+        GameLine::Infinity => run_infinity(usb0, usb_dp, usb_dm).await,
+    }
+}
+
+async fn run_skylanders(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'static>) {
     static EP_MEMORY: StaticCell<[u32; 1024]> = StaticCell::new();
 
     let usb = Usb::new(usb0, usb_dp, usb_dm);
@@ -63,14 +67,13 @@ pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'s
         if usb_dev.poll(&mut [&mut class]) {
             class.poll_usb();
         }
+        class.poll_in_endpoint();
 
         Timer::after(Duration::from_millis(1)).await;
     }
 }
 
-#[cfg(feature = "usb-infinity")]
-#[embassy_executor::task]
-pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'static>) {
+async fn run_infinity(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'static>) {
     static EP_MEMORY: StaticCell<[u32; 1024]> = StaticCell::new();
 
     let usb = Usb::new(usb0, usb_dp, usb_dm);
@@ -110,7 +113,6 @@ pub async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GPIO19<'s
     }
 }
 
-#[cfg(not(feature = "usb-infinity"))]
 struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     iface: InterfaceNumber,
     ep_in: EndpointIn<'a, B>,
@@ -125,7 +127,6 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     dirty_write_deadline: Option<Instant>,
 }
 
-#[cfg(not(feature = "usb-infinity"))]
 impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     fn new(alloc: &'a UsbBusAllocator<B>) -> Self {
         Self {
@@ -372,7 +373,6 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     }
 }
 
-#[cfg(feature = "usb-infinity")]
 struct InfinityBaseClass<'a, B: usb_device::bus::UsbBus> {
     iface: InterfaceNumber,
     ep_in: EndpointIn<'a, B>,
@@ -389,7 +389,6 @@ struct InfinityBaseClass<'a, B: usb_device::bus::UsbBus> {
     dirty_write_deadline: Option<Instant>,
 }
 
-#[cfg(feature = "usb-infinity")]
 impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
     fn new(alloc: &'a UsbBusAllocator<B>) -> Self {
         Self {
@@ -735,7 +734,6 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
     }
 }
 
-#[cfg(not(feature = "usb-infinity"))]
 impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
     fn get_configuration_descriptors(
         &self,
@@ -837,7 +835,6 @@ impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
     }
 }
 
-#[cfg(feature = "usb-infinity")]
 impl<B: usb_device::bus::UsbBus> UsbClass<B> for InfinityBaseClass<'_, B> {
     fn get_configuration_descriptors(
         &self,

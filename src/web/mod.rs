@@ -66,7 +66,7 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     } else if method == "GET" && path == routes::STATUS_PATH {
         let body = format!(
             "{{\"mode\":\"{}\",\"active_entity\":{},\"active_slots\":{},\"storage\":{}}}\n",
-            crate::usb::DEVICE_MODE.wire_name(),
+            crate::storage::usb_mode().wire_name(),
             crate::storage::active_entity_json(),
             crate::storage::active_slots_json(),
             crate::storage::status_json()
@@ -82,6 +82,12 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         .await;
     } else if method == "GET" && path == "/api/catalog" {
         write_catalog(socket, query).await;
+    } else if method == "POST" && path == "/api/mode/set" {
+        write_storage_result(
+            socket,
+            crate::storage::set_usb_mode_from_params(params(query, body).as_str()),
+        )
+        .await;
     } else if method == "POST" && path == "/api/identity/create" {
         write_storage_result(
             socket,

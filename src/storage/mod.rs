@@ -180,6 +180,47 @@ pub fn active_slots_marker() -> ([Option<RecordId>; MAX_FIGURES], u32) {
     .unwrap_or(([None; MAX_FIGURES], 0))
 }
 
+pub fn usb_mode() -> GameLine {
+    with_store(|store| store.catalog.usb_mode).unwrap_or(GameLine::Skylanders)
+}
+
+pub fn set_usb_mode_from_params(params: &str) -> Result<String, StorageError> {
+    let mode = query_param(params, "mode")
+        .or_else(|| query_param(params, "game"))
+        .ok_or(StorageError::BadRequest)?;
+    let mode = match mode.as_str() {
+        "skylanders" => GameLine::Skylanders,
+        "infinity" => GameLine::Infinity,
+        _ => return Err(StorageError::BadRequest),
+    };
+
+    with_store_mut(|store| {
+        let changed = store.catalog.usb_mode != mode;
+        if changed {
+            let generation = store.catalog.next_generation();
+            store.catalog.usb_mode = mode;
+            store.catalog.active_slots = [None; MAX_FIGURES];
+            store.catalog.active_config_generation = generation;
+            let payload = encode_config(store.catalog.active_slots, store.catalog.usb_mode);
+            append_record(
+                &mut store.flash,
+                &mut store.catalog,
+                RECORD_KIND_CONFIG_UPSERT,
+                0,
+                generation,
+                &payload,
+            )?;
+        }
+
+        Ok(format!(
+            "{{\"mode\":\"{}\",\"changed\":{},\"reboot_required\":{}}}\n",
+            store.catalog.usb_mode.wire_name(),
+            if changed { "true" } else { "false" },
+            if changed { "true" } else { "false" }
+        ))
+    })
+}
+
 pub fn active_slot_images() -> Result<Vec<(u8, RecordId, Vec<u8>)>, StorageError> {
     active_slot_images_for_game(GameLine::Skylanders, MAX_FIGURES)
 }
@@ -818,6 +859,15 @@ pub fn compact_storage() -> Result<String, StorageError> {
         }
 
         store.catalog.active_config_generation = generation;
+        let payload = encode_config(store.catalog.active_slots, store.catalog.usb_mode);
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_CONFIG_UPSERT,
+            0,
+            generation,
+            &payload,
+        )?;
 
         store.catalog.next_generation = generation;
         Ok(format!(
@@ -1111,6 +1161,7 @@ struct Catalog {
     identities: [Option<CharacterIdentity>; MAX_IDENTITIES],
     entities: [Option<Entity>; MAX_ENTITIES],
     blobs: [Option<StoredBlob>; MAX_ENTITIES],
+    usb_mode: GameLine,
     active_slots: [Option<RecordId>; MAX_FIGURES],
     active_config_generation: u32,
     needs_format: bool,
@@ -1127,6 +1178,7 @@ impl Catalog {
             identities: [None; MAX_IDENTITIES],
             entities: [None; MAX_ENTITIES],
             blobs: [None; MAX_ENTITIES],
+            usb_mode: GameLine::Skylanders,
             active_slots: [None; MAX_FIGURES],
             active_config_generation: 0,
             needs_format: false,
@@ -1264,12 +1316,13 @@ impl Catalog {
 
     fn status_json(&self) -> String {
         format!(
-            "{{\"storage\":\"{}\",\"identities\":{},\"entities\":{},\"active_entity_id\":{},\"active_slots\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
+            "{{\"storage\":\"{}\",\"usb_mode\":\"{}\",\"identities\":{},\"entities\":{},\"active_entity_id\":{},\"active_slots\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
             if self.needs_format {
                 "needs-format"
             } else {
                 "ok"
             },
+            self.usb_mode.wire_name(),
             self.identity_count(),
             self.entity_count(),
             option_record_id_json(self.active_entity_id()),
@@ -1490,7 +1543,9 @@ fn apply_record(
         }
         RECORD_KIND_CONFIG_UPSERT => {
             catalog.next_generation = catalog.next_generation.max(record.generation + 1);
-            catalog.active_slots = decode_config(payload);
+            let config = decode_config(payload);
+            catalog.active_slots = config.active_slots;
+            catalog.usb_mode = config.usb_mode;
             catalog.active_config_generation = record.generation;
         }
         _ => {}
@@ -1541,9 +1596,10 @@ fn append_config_record(
     flash: &mut StorageFlash,
     catalog: &mut Catalog,
     active_slots: [Option<RecordId>; MAX_FIGURES],
+    usb_mode: GameLine,
     generation: u32,
 ) -> Result<(), StorageError> {
-    let payload = encode_config(active_slots);
+    let payload = encode_config(active_slots, usb_mode);
     append_record(
         flash,
         catalog,
@@ -1784,19 +1840,45 @@ fn decode_entity(id: u32, _generation: u32, payload: &[u8]) -> Option<Entity> {
     })
 }
 
-#[cfg(test)]
-fn encode_config(active_slots: [Option<RecordId>; MAX_FIGURES]) -> [u8; 4 + MAX_FIGURES * 4] {
-    let mut out = [0; 4 + MAX_FIGURES * 4];
+fn encode_config(
+    active_slots: [Option<RecordId>; MAX_FIGURES],
+    usb_mode: GameLine,
+) -> [u8; 8 + MAX_FIGURES * 4] {
+    let mut out = [0; 8 + MAX_FIGURES * 4];
     out[0..4].copy_from_slice(CONFIG_SLOTS_MAGIC);
+    out[4] = usb_mode.as_u8();
     for (slot, entity_id) in active_slots.iter().enumerate() {
-        let start = 4 + slot * 4;
+        let start = 8 + slot * 4;
         out[start..start + 4].copy_from_slice(&entity_id.map(|id| id.0).unwrap_or(0).to_le_bytes());
     }
     out
 }
 
-fn decode_config(payload: &[u8]) -> [Option<RecordId>; MAX_FIGURES] {
+#[derive(Clone, Copy)]
+struct DecodedConfig {
+    active_slots: [Option<RecordId>; MAX_FIGURES],
+    usb_mode: GameLine,
+}
+
+fn decode_config(payload: &[u8]) -> DecodedConfig {
     let mut active_slots = [None; MAX_FIGURES];
+    let mut usb_mode = GameLine::Skylanders;
+
+    if payload.len() >= 8 + MAX_FIGURES * 4 && &payload[0..4] == CONFIG_SLOTS_MAGIC {
+        usb_mode = GameLine::from_u8(payload[4]).unwrap_or(GameLine::Skylanders);
+        for (slot, active_slot) in active_slots.iter_mut().enumerate() {
+            let start = 8 + slot * 4;
+            let id = u32::from_le_bytes(payload[start..start + 4].try_into().unwrap_or([0; 4]));
+            if id != 0 {
+                *active_slot = Some(RecordId(id));
+            }
+        }
+        return DecodedConfig {
+            active_slots,
+            usb_mode,
+        };
+    }
+
     if payload.len() >= 4 + MAX_FIGURES * 4 && &payload[0..4] == CONFIG_SLOTS_MAGIC {
         for (slot, active_slot) in active_slots.iter_mut().enumerate() {
             let start = 4 + slot * 4;
@@ -1805,7 +1887,10 @@ fn decode_config(payload: &[u8]) -> [Option<RecordId>; MAX_FIGURES] {
                 *active_slot = Some(RecordId(id));
             }
         }
-        return active_slots;
+        return DecodedConfig {
+            active_slots,
+            usb_mode,
+        };
     }
 
     if payload.len() >= 8 && payload[0] != 0 {
@@ -1816,7 +1901,10 @@ fn decode_config(payload: &[u8]) -> [Option<RecordId>; MAX_FIGURES] {
             }
         }
     }
-    active_slots
+    DecodedConfig {
+        active_slots,
+        usb_mode,
+    }
 }
 
 pub fn crc32(bytes: &[u8]) -> u32 {
@@ -2098,17 +2186,19 @@ mod tests {
     fn config_payload_supports_legacy_and_multi_slot_records() {
         let legacy = [1, 0, 0, 0, 42, 0, 0, 0];
         let decoded = decode_config(&legacy);
-        assert_eq!(decoded[0], Some(RecordId(42)));
-        assert_eq!(decoded[1], None);
+        assert_eq!(decoded.usb_mode, GameLine::Skylanders);
+        assert_eq!(decoded.active_slots[0], Some(RecordId(42)));
+        assert_eq!(decoded.active_slots[1], None);
 
         let mut active_slots = [None; MAX_FIGURES];
         active_slots[0] = Some(RecordId(8));
         active_slots[3] = Some(RecordId(11));
 
-        let decoded = decode_config(&encode_config(active_slots));
-        assert_eq!(decoded[0], Some(RecordId(8)));
-        assert_eq!(decoded[3], Some(RecordId(11)));
-        assert_eq!(decoded[4], None);
+        let decoded = decode_config(&encode_config(active_slots, GameLine::Infinity));
+        assert_eq!(decoded.usb_mode, GameLine::Infinity);
+        assert_eq!(decoded.active_slots[0], Some(RecordId(8)));
+        assert_eq!(decoded.active_slots[3], Some(RecordId(11)));
+        assert_eq!(decoded.active_slots[4], None);
     }
 
     #[test]
@@ -2371,7 +2461,14 @@ mod tests {
         .unwrap();
         let mut active_slots = [None; MAX_FIGURES];
         active_slots[0] = Some(RecordId(8));
-        append_config_record(&mut flash, &mut catalog, active_slots, 5).unwrap();
+        append_config_record(
+            &mut flash,
+            &mut catalog,
+            active_slots,
+            GameLine::Infinity,
+            5,
+        )
+        .unwrap();
 
         let used_bytes = catalog.write_offset;
         let mut rebuilt = Catalog::new();
@@ -2389,6 +2486,7 @@ mod tests {
         assert_eq!(rebuilt.blob(BlobId(2)).unwrap().len, image.len() as u32);
         assert_eq!(rebuilt.active_entity_id(), Some(RecordId(8)));
         assert_eq!(rebuilt.active_slots[0], Some(RecordId(8)));
+        assert_eq!(rebuilt.usb_mode, GameLine::Infinity);
         assert_eq!(rebuilt.next_record_id, 9);
         assert_eq!(rebuilt.next_blob_id, 3);
         assert_eq!(rebuilt.next_generation, 6);

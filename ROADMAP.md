@@ -210,6 +210,7 @@ Definition of done: an Infinity game on the Wii sees the selected named entity a
 
 ### Phase G — Mode Toggle (Skylanders ⇄ Infinity)
 
+- [x] Build a single firmware image containing both Skylanders and Disney Infinity USB implementations, selecting the active descriptor/protocol from persisted device config at boot.
 - [ ] Before toggling modes, flush any dirty active-entity data to flash.
 - [ ] Implement a soft USB disconnect/reconnect: on mode toggle from the Web UI, disconnect the USB device, swap which descriptor set + command handler is active, then reconnect so the Wii re-enumerates the device type.
 - [ ] Add a toggle control to the web UI, wired to this logic.
