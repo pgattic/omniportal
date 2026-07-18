@@ -53,10 +53,10 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 </section>
 
 <section>
-<h2>Portal of Power</h2>
+<h2 id="deviceHeading">Active Device</h2>
 <div id="slots" class="slots"></div>
 <div class="actions">
-<button onclick="clearActive()">Clear Portal</button>
+<button id="clearDeviceButton" onclick="clearActive()">Clear Device</button>
 </div>
 </section>
 
@@ -81,8 +81,8 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 </select></label>
 <label>Search<input id="catalogSearch" placeholder="Filter catalog"></label>
 </div>
-<label>Figure<select name="catalog_index" id="catalogSelect"></select></label>
-<label>Entity Name<input name="name" required placeholder="Name"></label>
+<label>Catalog Item<select name="catalog_index" id="catalogSelect"></select></label>
+<label>Collection Name<input name="name" required placeholder="Name"></label>
 <button class="primary" type="submit">Add Entity</button>
 <div class="meta" id="catalogCount"></div>
 </form>
@@ -95,7 +95,7 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <option value="skylanders">Skylanders</option>
 <option value="infinity">Disney Infinity</option>
 </select></label>
-<label>Entity Name<input name="name" required placeholder="Imported entity name"></label>
+<label>Collection Name<input name="name" required placeholder="Imported item name"></label>
 <label>Entity Binary<input name="file" type="file" required></label>
 <button type="submit">Import Entity</button>
 </form>
@@ -151,16 +151,31 @@ async function refreshAll() {
 function renderStatus(status) {
   currentMode = status.mode || "skylanders";
   $("modeSelect").value = currentMode;
+  renderDeviceLabels();
   const storage = status.storage || {};
   const slots = status.active_slots || [];
   const used = storage.used_bytes || 0;
   const capacity = storage.capacity_bytes || 0;
   $("status").innerHTML =
     `<div>Mode: ${status.mode || "unknown"}</div>` +
-    `<div>Figures on portal: ${slots.length}</div>` +
+    `<div>${activeItemLabel(true)} on ${deviceName()}: ${slots.length}</div>` +
     `<div>Records: ${storage.entities || 0} entities</div>` +
     `<div>Storage: ${used} / ${capacity} bytes (${storagePercent(used, capacity)})</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
+}
+
+function deviceName(mode = currentMode) {
+  return mode === "infinity" ? "Base" : "Portal of Power";
+}
+
+function activeItemLabel(plural = false, mode = currentMode) {
+  if (mode === "infinity") return plural ? "Toys" : "Toy";
+  return plural ? "Figures" : "Figure";
+}
+
+function renderDeviceLabels() {
+  $("deviceHeading").textContent = deviceName();
+  $("clearDeviceButton").textContent = `Clear ${deviceName()}`;
 }
 
 async function switchMode() {
@@ -216,8 +231,8 @@ function renderEntities() {
     const download = `<a href="/api/entity/${item.id}.bin">Export</a>`;
     const clone = `<button onclick="cloneEntity(${item.id})">Clone</button>`;
     const place_remove = slots.length
-      ? slots.map(slot => `<button onclick="removeSlot(${slot - 1})">Remove from Portal</button>`).join("")
-      : `<button onclick="placeEntityFirstAvailable(${item.id})">Place on Portal</button>`;
+      ? slots.map(slot => `<button onclick="removeSlot(${slot - 1})">Remove from ${deviceName(currentMode)}</button>`).join("")
+      : `<button onclick="placeEntityFirstAvailable(${item.id})">Place on ${deviceName(currentMode)}</button>`;
     return itemShell(
       `#${item.id} ${escapeHtml(item.name)}${active}`,
       entityMeta(item),
@@ -253,7 +268,7 @@ function renderSlots() {
         `<div class="slot-title">${portal.label}</div>` +
         `<div class="actions">` +
         `<select id="portalAddSelect${portal.slot}">${options}</select>` +
-        `<button title="Place on Portal" onclick="placePortalAddSelect(${portal.slot})" ${options ? "" : "disabled"}>+</button>` +
+        `<button title="Place on ${deviceName()}" onclick="placePortalAddSelect(${portal.slot})" ${options ? "" : "disabled"}>+</button>` +
         `</div></div>`;
     }).join("");
     return;
@@ -276,14 +291,14 @@ function renderSlots() {
     .join("");
   const availableEntities = sortedEntities.filter(item => item.game === "skylanders" && !activeSlots.some(active => active.entity_id === item.id));
   const addCard = firstEmptySlot(activeSlots) == null
-    ? `<div class="slot empty"><div class="slot-title">Portal Full</div><div class="meta">Remove a figure before adding another.</div></div>`
+    ? `<div class="slot empty"><div class="slot-title">${deviceName()} Full</div><div class="meta">Remove a figure before adding another.</div></div>`
     : `<div class="slot empty portal-add">` +
       `<div class="slot-title">Add Figure</div>` +
       `<div class="actions">` +
       `<select id="portalAddSelect">${entityOptions(availableEntities, null)}</select>` +
-      `<button title="Place on Portal" onclick="placePortalAddSelect()" ${availableEntities.length ? "" : "disabled"}>+</button>` +
+      `<button title="Place on ${deviceName()}" onclick="placePortalAddSelect()" ${availableEntities.length ? "" : "disabled"}>+</button>` +
       `</div></div>`;
-  $("slots").innerHTML = (activeCards || "<div class='meta'>Portal is empty.</div>") + addCard;
+  $("slots").innerHTML = (activeCards || `<div class='meta'>${deviceName()} is empty.</div>`) + addCard;
 }
 
 function entityOptions(entities, selectedId) {
@@ -387,7 +402,7 @@ async function placeEntityInSlot(id, slot) {
   const index = Number(slot);
   const limit = currentMode === "infinity" ? infinityPortalSlots.length : skylandersPortalSlotCount;
   if (!Number.isInteger(index) || index < 0 || index >= limit) {
-    say("portal target is invalid");
+    say(`${deviceName()} target is invalid`);
     return;
   }
   await post("/api/entity/select", `id=${id}&slot=${index}`);
@@ -397,7 +412,7 @@ async function placeEntityFirstAvailable(id) {
   const entity = (library.entities || []).find(item => item.id === id);
   const slot = entity ? firstAvailableSlotForEntity(entity) : null;
   if (slot == null) {
-    say("no compatible portal position is available");
+    say(`no compatible ${deviceName()} position is available`);
     return;
   }
   await placeEntityInSlot(id, slot);
