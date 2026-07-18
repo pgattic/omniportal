@@ -308,7 +308,7 @@ fn md5_process_block(
     *d0 = d0.wrapping_add(d);
 }
 
-fn aes128_encrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+pub(crate) fn aes128_encrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
     let round_keys = aes128_key_expansion(key);
     let mut state = *block;
     add_round_key(&mut state, &round_keys[0..16]);
@@ -326,7 +326,7 @@ fn aes128_encrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
     state
 }
 
-fn aes128_decrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+pub(crate) fn aes128_decrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
     let round_keys = aes128_key_expansion(key);
     let mut state = *block;
     add_round_key(&mut state, &round_keys[160..176]);

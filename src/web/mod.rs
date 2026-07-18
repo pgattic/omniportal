@@ -202,10 +202,38 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
         .min(MAX_LIMIT);
 
     if game == "infinity" {
+        let mut total = 0usize;
+        for entry in crate::figures::infinity::INFINITY_CATALOG {
+            if infinity_catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
+                total += 1;
+            }
+        }
+
         let body = format!(
-            "{{\"game\":\"infinity\",\"offset\":{},\"limit\":{},\"total\":0,\"figures\":[]}}\n",
-            offset, limit
+            "{{\"game\":\"infinity\",\"offset\":{},\"limit\":{},\"total\":{},\"figures\":[",
+            offset, limit, total
         );
+        let mut body = body;
+        let mut emitted = 0usize;
+        let mut seen = 0usize;
+        for entry in crate::figures::infinity::INFINITY_CATALOG {
+            if !infinity_catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
+                continue;
+            }
+            if seen < offset {
+                seen += 1;
+                continue;
+            }
+            if emitted >= limit {
+                break;
+            }
+            if emitted > 0 {
+                body.push(',');
+            }
+            emitted += 1;
+            push_infinity_catalog_entry(&mut body, entry);
+        }
+        body.push_str("]}\n");
         write_text(socket, "200 OK", "application/json", body.as_str()).await;
         return;
     }
@@ -288,6 +316,22 @@ fn push_skylanders_catalog_entry(
 }
 
 #[cfg(target_arch = "xtensa")]
+fn push_infinity_catalog_entry(
+    body: &mut String,
+    entry: &crate::figures::infinity::FigureCatalogEntry,
+) {
+    body.push_str(&format!(
+        "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"figure_number\":{}}}",
+        entry.index,
+        entry.game_line.wire_name(),
+        entry.kind.wire_name(),
+        entry.series,
+        entry.name,
+        entry.figure_number
+    ));
+}
+
+#[cfg(target_arch = "xtensa")]
 fn catalog_entry_matches(
     entry: &crate::figures::skylanders::catalog::FigureCatalogEntry,
     kind: Option<&str>,
@@ -305,6 +349,26 @@ fn catalog_entry_matches(
     contains_ascii_case_insensitive(entry.name, search)
         || contains_ascii_case_insensitive(entry.series, search)
         || format!("{}", entry.character_id).contains(search)
+}
+
+#[cfg(target_arch = "xtensa")]
+fn infinity_catalog_entry_matches(
+    entry: &crate::figures::infinity::FigureCatalogEntry,
+    kind: Option<&str>,
+    search: &str,
+) -> bool {
+    if let Some(kind) = kind {
+        if !kind.is_empty() && kind != entry.kind.wire_name() {
+            return false;
+        }
+    }
+    if search.is_empty() {
+        return true;
+    }
+
+    contains_ascii_case_insensitive(entry.name, search)
+        || contains_ascii_case_insensitive(entry.series, search)
+        || format!("{}", entry.figure_number).contains(search)
 }
 
 #[cfg(target_arch = "xtensa")]

@@ -3,7 +3,7 @@ use core::cell::RefCell;
 use crate::config;
 use crate::domain::{FigureKind, GameLine, ImageFormat};
 use crate::figures::formats::{INFINITY_IMAGE_BYTES, SKYLANDERS_IMAGE_BYTES};
-use crate::figures::infinity::infinity_catalog_entry;
+use crate::figures::infinity::{infinity_catalog_entry, initialize_infinity_entity_image};
 use crate::figures::skylanders::catalog::{
     skylanders_catalog_entry, FigureCatalogEntry as SkylandersCatalogEntry, SKYLANDERS_CATALOG,
 };
@@ -384,6 +384,7 @@ fn create_infinity_entity_from_catalog(
     let entry = infinity_catalog_entry(catalog_index).ok_or(StorageError::NotFound)?;
     with_store_mut(|store| {
         let entity_id = store.catalog.next_record_id();
+        let image = initialize_infinity_entity_image(entry.figure_number, entity_id.0);
         let generation = store.catalog.next_generation();
         let entity = Entity {
             id: entity_id,
@@ -397,8 +398,8 @@ fn create_infinity_entity_from_catalog(
             variant_id: None,
             blob_id: None,
             image_format: ImageFormat::InfinityUnknown,
-            image_len: 0,
-            image_crc32: 0,
+            image_len: image.len() as u32,
+            image_crc32: crc32(&image),
             created_generation: generation,
             updated_generation: generation,
         };
@@ -934,7 +935,12 @@ fn generated_entity_image(entity: Entity) -> Vec<u8> {
             out.extend_from_slice(&image);
             out
         }
-        GameLine::Infinity => Vec::new(),
+        GameLine::Infinity => {
+            let image = initialize_infinity_entity_image(entity.character_id, entity.id.0);
+            let mut out = Vec::new();
+            out.extend_from_slice(&image);
+            out
+        }
     }
 }
 
@@ -1294,8 +1300,10 @@ impl Catalog {
             first = false;
             let figure_name = entity
                 .catalog_index
-                .and_then(skylanders_catalog_entry)
-                .map(|entry| entry.name);
+                .and_then(|index| match entity.game_line {
+                    GameLine::Skylanders => skylanders_catalog_entry(index).map(|entry| entry.name),
+                    GameLine::Infinity => infinity_catalog_entry(index).map(|entry| entry.name),
+                });
             out.push_str(&format!(
                 "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
                 entity.id.0,
@@ -2268,6 +2276,23 @@ mod tests {
         catalog.delete_entity(entity.id).unwrap();
         assert_eq!(catalog.entity_count(), 0);
         assert_eq!(catalog.active_entity_id(), None);
+    }
+
+    #[test]
+    fn library_json_resolves_catalog_names_by_game_line() {
+        let mut catalog = Catalog::new();
+        let mut entity = test_entity();
+        entity.game_line = GameLine::Infinity;
+        entity.catalog_index = Some(2);
+        entity.character_id = 0x0f4243;
+        entity.variant_id = None;
+        entity.blob_id = None;
+        entity.image_format = ImageFormat::InfinityUnknown;
+        catalog.upsert_entity(entity).unwrap();
+
+        let json = catalog.library_json();
+        assert!(json.contains("\"figure\":\"Jack Sparrow\""));
+        assert!(!json.contains("Polar Whirlwind"));
     }
 
     #[test]
