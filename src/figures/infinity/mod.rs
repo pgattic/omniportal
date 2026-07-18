@@ -11,3 +11,7 @@ pub struct FigureCatalogEntry {
 }
 
 pub const INFINITY_CATALOG: &[FigureCatalogEntry] = &[];
+
+pub fn infinity_catalog_entry(index: u16) -> Option<&'static FigureCatalogEntry> {
+    INFINITY_CATALOG.get(index as usize)
+}

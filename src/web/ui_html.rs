@@ -59,6 +59,10 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <h2>Add to Collection</h2>
 <form id="entityForm">
 <div class="row">
+<label>Game<select name="game" id="catalogGame">
+<option value="skylanders">Skylanders</option>
+<option value="infinity">Disney Infinity</option>
+</select></label>
 <label>Type<select id="catalogKind">
 <option value="">All types</option>
 <option value="character">Characters</option>
@@ -68,6 +72,7 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <option value="vehicle">Vehicles</option>
 <option value="creation-crystal">Creation crystals</option>
 <option value="trophy">Trophies</option>
+<option value="power-disc">Power discs</option>
 </select></label>
 <label>Search<input id="catalogSearch" placeholder="Filter catalog"></label>
 </div>
@@ -81,6 +86,10 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <section>
 <h2>Import</h2>
 <form id="uploadEntityForm">
+<label>Game<select name="game">
+<option value="skylanders">Skylanders</option>
+<option value="infinity">Disney Infinity</option>
+</select></label>
 <label>Entity Name<input name="name" required placeholder="Imported entity name"></label>
 <label>Entity Binary<input name="file" type="file" required></label>
 <button type="submit">Import Entity</button>
@@ -142,9 +151,10 @@ function renderStatus(status) {
 }
 
 async function loadCatalog() {
+  const game = $("catalogGame").value;
   const kind = $("catalogKind").value;
   const search = $("catalogSearch").value.trim();
-  const loaded = await api(`/api/catalog?kind=${enc(kind)}&q=${enc(search)}&limit=30`);
+  const loaded = await api(`/api/catalog?game=${enc(game)}&kind=${enc(kind)}&q=${enc(search)}&limit=30`);
   catalog = loaded.figures || loaded.skylanders || [];
   catalogTotal = loaded.total || catalog.length;
   renderCatalog();
@@ -259,6 +269,7 @@ function escapeHtml(value) {
 }
 
 $("catalogKind").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
+$("catalogGame").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
 $("catalogSearch").addEventListener("input", () => {
   clearTimeout(catalogTimer);
   catalogTimer = setTimeout(() => loadCatalog().catch(error => say(error.message)), 250);
@@ -278,7 +289,7 @@ $("uploadEntityForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.target;
   const file = form.elements.file.files[0];
-  const query = `name=${enc(form.elements.name.value)}`;
+  const query = `game=${enc(form.elements.game.value)}&name=${enc(form.elements.name.value)}`;
   try {
     say(await api(`/api/entity/upload?${query}`, {method:"POST", body: await file.arrayBuffer()}));
     form.reset();

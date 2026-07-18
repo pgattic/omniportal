@@ -3,8 +3,9 @@ use core::cell::RefCell;
 use crate::config;
 use crate::domain::{FigureKind, GameLine, ImageFormat};
 use crate::figures::formats::SKYLANDERS_IMAGE_BYTES;
+use crate::figures::infinity::infinity_catalog_entry;
 use crate::figures::skylanders::catalog::{
-    skylanders_catalog_entry, FigureCatalogEntry, SKYLANDERS_CATALOG,
+    skylanders_catalog_entry, FigureCatalogEntry as SkylandersCatalogEntry, SKYLANDERS_CATALOG,
 };
 use crate::figures::skylanders::crypto::validate_skylanders_mifare_image;
 use crate::figures::skylanders::image::{
@@ -293,13 +294,23 @@ pub fn create_entity_from_params(params: &str) -> Result<String, StorageError> {
 }
 
 pub fn create_entity_from_catalog_params(params: &str) -> Result<String, StorageError> {
+    let game = parse_game_param(params)?.unwrap_or(GameLine::Skylanders);
     let catalog_index = query_param(params, "catalog_index")
         .and_then(|value| parse_u32(value.as_str()))
         .and_then(|value| u16::try_from(value).ok())
         .ok_or(StorageError::BadRequest)?;
     let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
-    let entry = skylanders_catalog_entry(catalog_index).ok_or(StorageError::NotFound)?;
+    match game {
+        GameLine::Skylanders => create_skylanders_entity_from_catalog(catalog_index, &name),
+        GameLine::Infinity => create_infinity_entity_from_catalog(catalog_index, &name),
+    }
+}
 
+fn create_skylanders_entity_from_catalog(
+    catalog_index: u16,
+    name: &str,
+) -> Result<String, StorageError> {
+    let entry = skylanders_catalog_entry(catalog_index).ok_or(StorageError::NotFound)?;
     with_store_mut(|store| {
         let variant_id = if entry.has_variant() {
             Some(entry.variant_id)
@@ -356,7 +367,56 @@ pub fn create_entity_from_catalog_params(params: &str) -> Result<String, Storage
     })
 }
 
+fn create_infinity_entity_from_catalog(
+    catalog_index: u16,
+    name: &str,
+) -> Result<String, StorageError> {
+    let entry = infinity_catalog_entry(catalog_index).ok_or(StorageError::NotFound)?;
+    with_store_mut(|store| {
+        let entity_id = store.catalog.next_record_id();
+        let generation = store.catalog.next_generation();
+        let entity = Entity {
+            id: entity_id,
+            name: FixedText::from_str(name).map_err(|_| StorageError::BadRequest)?,
+            parent_identity_id: None,
+            catalog_index: Some(entry.index),
+            game_line: GameLine::Infinity,
+            kind: entry.kind,
+            data_mode: EntityDataMode::StaticGenerated,
+            character_id: entry.figure_number,
+            variant_id: None,
+            blob_id: None,
+            image_format: ImageFormat::InfinityUnknown,
+            image_len: 0,
+            image_crc32: 0,
+            created_generation: generation,
+            updated_generation: generation,
+        };
+        append_entity_record(store, entity)?;
+        Ok(format!(
+            "{{\"created\":\"entity\",\"id\":{},\"catalog_index\":{},\"data_mode\":\"{}\",\"blob_id\":null,\"name\":\"{}\",\"figure\":\"{}\",\"game\":\"{}\"}}\n",
+            entity_id.0,
+            entry.index,
+            entity.data_mode.wire_name(),
+            json_escape(entity.name.as_str()),
+            json_escape(entry.name),
+            entity.game_line.wire_name()
+        ))
+    })
+}
+
 pub fn upload_entity_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
+    let game = parse_game_param(params)?.unwrap_or(GameLine::Skylanders);
+    match game {
+        GameLine::Skylanders => upload_skylanders_entity_from_params(params, image),
+        GameLine::Infinity => upload_infinity_entity_from_params(params, image),
+    }
+}
+
+fn upload_skylanders_entity_from_params(
+    params: &str,
+    image: &[u8],
+) -> Result<String, StorageError> {
     let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
     let identity_id =
         query_param(params, "identity_id").and_then(|value| parse_u32(value.as_str()));
@@ -409,6 +469,50 @@ pub fn upload_entity_from_params(params: &str, image: &[u8]) -> Result<String, S
             option_u32_json(entity.variant_id),
             entity.kind.wire_name(),
             option_str_json(imported.catalog_entry.map(|entry| entry.name))
+        ))
+    })
+}
+
+fn upload_infinity_entity_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
+    let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
+    if image.is_empty() {
+        return Err(StorageError::BadRequest);
+    }
+    let identity_id =
+        query_param(params, "identity_id").and_then(|value| parse_u32(value.as_str()));
+
+    with_store_mut(|store| {
+        let identity = identity_id.and_then(|id| store.catalog.identity(RecordId(id)));
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
+        let entity_id = store.catalog.next_record_id();
+        let generation = store.catalog.next_generation();
+        let entity = Entity {
+            id: entity_id,
+            name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
+            parent_identity_id: identity.map(|item| item.id),
+            catalog_index: None,
+            game_line: GameLine::Infinity,
+            kind: identity
+                .map(|item| item.kind)
+                .unwrap_or(FigureKind::Unknown),
+            data_mode: EntityDataMode::MutableImage,
+            character_id: identity.map(|item| item.character_id).unwrap_or(0),
+            variant_id: None,
+            blob_id: Some(blob_id),
+            image_format: ImageFormat::InfinityUnknown,
+            image_len: image.len() as u32,
+            image_crc32: crc32(image),
+            created_generation: generation,
+            updated_generation: generation,
+        };
+        append_entity_record(store, entity)?;
+        Ok(format!(
+            "{{\"uploaded\":\"entity\",\"id\":{},\"blob_id\":{},\"name\":\"{}\",\"game\":\"{}\",\"format\":\"{}\"}}\n",
+            entity_id.0,
+            blob_id.0,
+            json_escape(entity.name.as_str()),
+            entity.game_line.wire_name(),
+            entity.image_format.wire_name()
         ))
     })
 }
@@ -811,7 +915,7 @@ fn generated_entity_image(entity: Entity) -> Vec<u8> {
 struct ImportedSkylandersImage {
     character_id: u32,
     variant_id: Option<u32>,
-    catalog_entry: Option<&'static FigureCatalogEntry>,
+    catalog_entry: Option<&'static SkylandersCatalogEntry>,
 }
 
 impl ImportedSkylandersImage {
@@ -836,10 +940,22 @@ impl ImportedSkylandersImage {
 fn find_skylanders_catalog_entry(
     character_id: u32,
     raw_variant_id: u32,
-) -> Option<&'static FigureCatalogEntry> {
+) -> Option<&'static SkylandersCatalogEntry> {
     SKYLANDERS_CATALOG
         .iter()
         .find(|entry| entry.character_id == character_id && entry.variant_id == raw_variant_id)
+}
+
+fn parse_game_param(params: &str) -> Result<Option<GameLine>, StorageError> {
+    let Some(game) = query_param(params, "game") else {
+        return Ok(None);
+    };
+    match game.as_str() {
+        "" => Ok(None),
+        "skylanders" => Ok(Some(GameLine::Skylanders)),
+        "infinity" => Ok(Some(GameLine::Infinity)),
+        _ => Err(StorageError::BadRequest),
+    }
 }
 
 fn initialize_new_entity_image(
@@ -1813,6 +1929,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_game_params_for_catalog_and_import_dispatch() {
+        assert_eq!(parse_game_param(""), Ok(None));
+        assert_eq!(parse_game_param("game="), Ok(None));
+        assert_eq!(
+            parse_game_param("game=skylanders"),
+            Ok(Some(GameLine::Skylanders))
+        );
+        assert_eq!(
+            parse_game_param("game=infinity"),
+            Ok(Some(GameLine::Infinity))
+        );
+        assert_eq!(
+            parse_game_param("game=unknown"),
+            Err(StorageError::BadRequest)
+        );
+    }
+
+    #[test]
     fn rejects_empty_and_oversized_record_text() {
         assert!(FixedText::<8>::from_str("").is_err());
         assert!(FixedText::<8>::from_str("123456789").is_err());
@@ -2023,6 +2157,7 @@ mod tests {
             panic!("expected infinity payload");
         };
         assert_eq!(payload.figure_number, 0x1234_5678);
+        assert_eq!(payload.kind, FigureKind::Character);
         assert_eq!(payload.image_format, ImageFormat::InfinityUnknown);
     }
 

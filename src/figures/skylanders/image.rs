@@ -145,7 +145,8 @@ fn initialize_default_save_data(image: &mut [u8; SKYLANDERS_IMAGE_BYTES], kind: 
         | FigureKind::CreationCrystal
         | FigureKind::Vehicle => initialize_character_save_data(image),
         FigureKind::Trophy => initialize_trophy_save_data(image),
-        FigureKind::Item | FigureKind::LevelPiece | FigureKind::Unknown => {}
+        FigureKind::Item | FigureKind::LevelPiece | FigureKind::PowerDisc | FigureKind::Unknown => {
+        }
     }
 }
 

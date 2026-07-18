@@ -37,6 +37,7 @@ pub enum FigureKind {
     CreationCrystal,
     LevelPiece,
     Trophy,
+    PowerDisc,
     Unknown,
 }
 
@@ -50,6 +51,7 @@ impl FigureKind {
             Self::CreationCrystal => 5,
             Self::LevelPiece => 6,
             Self::Trophy => 7,
+            Self::PowerDisc => 8,
             Self::Unknown => 255,
         }
     }
@@ -63,6 +65,7 @@ impl FigureKind {
             5 => Self::CreationCrystal,
             6 => Self::LevelPiece,
             7 => Self::Trophy,
+            8 => Self::PowerDisc,
             _ => Self::Unknown,
         }
     }
@@ -76,6 +79,7 @@ impl FigureKind {
             Self::CreationCrystal => "creation-crystal",
             Self::LevelPiece => "level-piece",
             Self::Trophy => "trophy",
+            Self::PowerDisc => "power-disc",
             Self::Unknown => "unknown",
         }
     }
