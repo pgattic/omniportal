@@ -1,12 +1,13 @@
 use core::cell::RefCell;
 
 use crate::config;
-use crate::figures::catalog::skylanders_catalog_entry;
+use crate::figures::catalog::{skylanders_catalog_entry, FigureCatalogEntry, SKYLANDERS_CATALOG};
 use crate::figures::formats::ImageFormat;
 use crate::figures::init::{
     initialize_mutable_skylanders_entity_image, initialize_skylanders_entity_image,
     rekey_skylanders_entity_image,
 };
+use crate::figures::skylanders_crypto::validate_skylanders_mifare_image;
 use crate::figures::{FigureKind, GameLine};
 #[cfg(target_arch = "xtensa")]
 use crate::platform::println;
@@ -357,18 +358,19 @@ pub fn upload_entity_from_params(params: &str, image: &[u8]) -> Result<String, S
     let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
     let identity_id =
         query_param(params, "identity_id").and_then(|value| parse_u32(value.as_str()));
-    if image.is_empty() {
-        return Err(StorageError::BadRequest);
-    }
+    let imported = ImportedSkylandersImage::parse(image).ok_or(StorageError::BadRequest)?;
 
     with_store_mut(|store| {
         let identity = identity_id.and_then(|id| store.catalog.identity(RecordId(id)));
-        let game_line = identity
-            .map(|item| item.game_line)
-            .unwrap_or(GameLine::Skylanders);
-        let image_format = identity
-            .map(|item| item.image_format)
-            .unwrap_or(ImageFormat::SkylandersMifare1k);
+        if let Some(identity) = identity {
+            if identity.character_id != imported.character_id
+                || identity.variant_id != imported.variant_id
+                || identity.image_format != ImageFormat::SkylandersMifare1k
+            {
+                return Err(StorageError::BadRequest);
+            }
+        }
+
         let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
         let image_crc32 = crc32(image);
         let entity_id = store.catalog.next_record_id();
@@ -377,16 +379,18 @@ pub fn upload_entity_from_params(params: &str, image: &[u8]) -> Result<String, S
             id: entity_id,
             name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
             parent_identity_id: identity.map(|item| item.id),
-            catalog_index: None,
-            game_line,
-            kind: identity
-                .map(|item| item.kind)
+            catalog_index: imported.catalog_entry.map(|entry| entry.index),
+            game_line: GameLine::Skylanders,
+            kind: imported
+                .catalog_entry
+                .map(|entry| entry.kind)
+                .or_else(|| identity.map(|item| item.kind))
                 .unwrap_or(FigureKind::Unknown),
             data_mode: EntityDataMode::MutableImage,
-            character_id: identity.map(|item| item.character_id).unwrap_or(0),
-            variant_id: identity.and_then(|item| item.variant_id),
+            character_id: imported.character_id,
+            variant_id: imported.variant_id,
             blob_id: Some(blob_id),
-            image_format,
+            image_format: ImageFormat::SkylandersMifare1k,
             image_len: image.len() as u32,
             image_crc32,
             created_generation: generation,
@@ -394,10 +398,15 @@ pub fn upload_entity_from_params(params: &str, image: &[u8]) -> Result<String, S
         };
         append_entity_record(store, entity)?;
         Ok(format!(
-            "{{\"uploaded\":\"entity\",\"id\":{},\"blob_id\":{},\"name\":\"{}\"}}\n",
+            "{{\"uploaded\":\"entity\",\"id\":{},\"blob_id\":{},\"name\":\"{}\",\"catalog_index\":{},\"character_id\":{},\"variant_id\":{},\"kind\":\"{}\",\"figure\":{}}}\n",
             entity_id.0,
             blob_id.0,
-            json_escape(entity.name.as_str())
+            json_escape(entity.name.as_str()),
+            option_u16_json(entity.catalog_index),
+            entity.character_id,
+            option_u32_json(entity.variant_id),
+            entity.kind.wire_name(),
+            option_str_json(imported.catalog_entry.map(|entry| entry.name))
         ))
     })
 }
@@ -519,30 +528,11 @@ pub fn rename_entity_from_query(query: &str) -> Result<String, StorageError> {
 }
 
 pub fn read_entity_blob(entity_id: RecordId) -> Result<Vec<u8>, StorageError> {
-    with_store_mut(|store| {
-        let entity = store
-            .catalog
-            .entity(entity_id)
-            .ok_or(StorageError::NotFound)?;
-        read_entity_image(store, entity)
-    })
+    with_store_mut(|store| read_entity_blob_from_store(store, entity_id))
 }
 
 pub fn replace_entity_blob(entity_id: RecordId, image: &[u8]) -> Result<(), StorageError> {
-    with_store_mut(|store| {
-        let mut entity = store
-            .catalog
-            .entity(entity_id)
-            .ok_or(StorageError::NotFound)?;
-        let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
-        entity.blob_id = Some(blob_id);
-        entity.data_mode = EntityDataMode::MutableImage;
-        entity.image_len = image.len() as u32;
-        entity.image_crc32 = crc32(image);
-        entity.updated_generation = store.catalog.next_generation();
-        append_entity_record(store, entity)?;
-        Ok(())
-    })
+    with_store_mut(|store| replace_entity_blob_in_store(store, entity_id, image))
 }
 
 pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
@@ -768,6 +758,36 @@ fn read_blob(store: &mut Store, blob_id: BlobId) -> Result<Vec<u8>, StorageError
     Ok(data)
 }
 
+fn read_entity_blob_from_store(
+    store: &mut Store,
+    entity_id: RecordId,
+) -> Result<Vec<u8>, StorageError> {
+    let entity = store
+        .catalog
+        .entity(entity_id)
+        .ok_or(StorageError::NotFound)?;
+    read_entity_image(store, entity)
+}
+
+fn replace_entity_blob_in_store(
+    store: &mut Store,
+    entity_id: RecordId,
+    image: &[u8],
+) -> Result<(), StorageError> {
+    let mut entity = store
+        .catalog
+        .entity(entity_id)
+        .ok_or(StorageError::NotFound)?;
+    let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
+    entity.blob_id = Some(blob_id);
+    entity.data_mode = EntityDataMode::MutableImage;
+    entity.image_len = image.len() as u32;
+    entity.image_crc32 = crc32(image);
+    entity.updated_generation = store.catalog.next_generation();
+    append_entity_record(store, entity)?;
+    Ok(())
+}
+
 fn read_entity_image(store: &mut Store, entity: Entity) -> Result<Vec<u8>, StorageError> {
     let image = if let Some(blob_id) = entity.blob_id {
         read_blob(store, blob_id)?
@@ -783,6 +803,41 @@ fn generated_entity_image(entity: Entity) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&image);
     out
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ImportedSkylandersImage {
+    character_id: u32,
+    variant_id: Option<u32>,
+    catalog_entry: Option<&'static FigureCatalogEntry>,
+}
+
+impl ImportedSkylandersImage {
+    fn parse(image: &[u8]) -> Option<Self> {
+        validate_skylanders_mifare_image(image).ok()?;
+        let character_id = u16::from_le_bytes(image.get(0x10..0x12)?.try_into().ok()?) as u32;
+        let raw_variant_id = u16::from_le_bytes(image.get(0x1c..0x1e)?.try_into().ok()?) as u32;
+        let variant_id = if raw_variant_id == 0 {
+            None
+        } else {
+            Some(raw_variant_id)
+        };
+        let catalog_entry = find_skylanders_catalog_entry(character_id, raw_variant_id);
+        Some(Self {
+            character_id,
+            variant_id,
+            catalog_entry,
+        })
+    }
+}
+
+fn find_skylanders_catalog_entry(
+    character_id: u32,
+    raw_variant_id: u32,
+) -> Option<&'static FigureCatalogEntry> {
+    SKYLANDERS_CATALOG
+        .iter()
+        .find(|entry| entry.character_id == character_id && entry.variant_id == raw_variant_id)
 }
 
 fn initialize_new_entity_image(
@@ -1696,6 +1751,7 @@ fn option_str_json(value: Option<&str>) -> String {
 mod tests {
     use super::*;
     use crate::figures::skylanders_crypto::decrypt_figure;
+    use crate::usb::skylanders::{handle_command, PortalState, PLACEMENT_STATUS_HOLD_REPORTS};
 
     fn test_identity() -> CharacterIdentity {
         CharacterIdentity {
@@ -1851,6 +1907,75 @@ mod tests {
 
         assert_eq!(decrypt_figure(&image), image);
         assert_eq!(&image[0x10..0x12], &230u16.to_le_bytes());
+    }
+
+    #[test]
+    fn imported_skylanders_images_are_validated_and_inferred() {
+        let image = initialize_new_entity_image(FigureKind::Character, 19, None, 1);
+        let imported = ImportedSkylandersImage::parse(&image).unwrap();
+
+        assert_eq!(imported.character_id, 19);
+        assert_eq!(imported.variant_id, None);
+        assert_eq!(imported.catalog_entry.unwrap().name, "Trigger Happy");
+
+        let mut bad = image;
+        bad[4] ^= 0x01;
+        assert_eq!(ImportedSkylandersImage::parse(&bad), None);
+    }
+
+    #[test]
+    fn write_back_loop_exports_replaced_entity_image() {
+        let mut store = Store {
+            flash: StorageFlash::new(),
+            catalog: Catalog::new(),
+        };
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_FORMAT_MARKER,
+            0,
+            1,
+            b"omniportal-storage-v1",
+        )
+        .unwrap();
+
+        let entity_id = RecordId(8);
+        let image = initialize_new_entity_image(FigureKind::Character, 19, None, entity_id.0);
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image).unwrap();
+        let mut entity = test_entity();
+        entity.id = entity_id;
+        entity.character_id = 19;
+        entity.variant_id = None;
+        entity.catalog_index = Some(67);
+        entity.blob_id = Some(blob_id);
+        entity.image_crc32 = crc32(&image);
+        append_entity_record(&mut store, entity).unwrap();
+
+        let mut portal = PortalState::new();
+        assert!(portal.load_entity_into_slot(0, entity_id.0, &image));
+        for _ in 0..=PLACEMENT_STATUS_HOLD_REPORTS {
+            portal.next_status_report();
+        }
+        let mut write_command = [0; 19];
+        write_command[0] = b'W';
+        write_command[1] = 0x10;
+        write_command[2] = 0x02;
+        write_command[3..].copy_from_slice(&[0xa5; 16]);
+        assert_eq!(
+            &handle_command(&mut portal, &write_command).unwrap().report[..3],
+            &[b'W', 0x10, 0x02]
+        );
+
+        let changed = portal.slot_image(0).unwrap();
+        replace_entity_blob_in_store(&mut store, entity_id, changed).unwrap();
+
+        assert_eq!(
+            read_entity_blob_from_store(&mut store, entity_id).unwrap(),
+            changed
+        );
+        let updated = store.catalog.entity(entity_id).unwrap();
+        assert_eq!(updated.image_len, changed.len() as u32);
+        assert_eq!(updated.image_crc32, crc32(changed));
     }
 
     #[test]

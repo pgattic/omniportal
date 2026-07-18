@@ -512,6 +512,12 @@ const INV_SBOX: [u8; 256] = [
 ];
 
 pub fn validate_generated_image(image: &[u8]) -> Result<(), GeneratedImageError> {
+    validate_skylanders_mifare_image(image)?;
+    validate_generated_blank_ciphertext(image)?;
+    Ok(())
+}
+
+pub fn validate_skylanders_mifare_image(image: &[u8]) -> Result<(), GeneratedImageError> {
     if image.len() != SKYLANDERS_IMAGE_BYTES || image.len() != FIGURE_SIZE {
         return Err(GeneratedImageError::Length);
     }
@@ -527,7 +533,6 @@ pub fn validate_generated_image(image: &[u8]) -> Result<(), GeneratedImageError>
     }
     validate_sector_trailers(image)?;
     validate_sector_keys(image)?;
-    validate_generated_blank_ciphertext(image)?;
     Ok(())
 }
 
