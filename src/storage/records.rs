@@ -1,5 +1,7 @@
-use crate::figures::formats::ImageFormat;
-use crate::figures::{FigureKind, GameLine};
+use crate::domain::{
+    CollectionEntity, EntityPayload, FigureKind, GameLine, ImageFormat, InfinityEntity,
+    SkylandersEntity,
+};
 
 pub const MAX_RECORD_NAME_BYTES: usize = 64;
 pub const MAX_SOURCE_NOTES_BYTES: usize = 96;
@@ -112,6 +114,31 @@ pub struct Entity {
     pub image_crc32: u32,
     pub created_generation: u32,
     pub updated_generation: u32,
+}
+
+impl Entity {
+    pub fn domain_entity(self) -> CollectionEntity {
+        CollectionEntity {
+            id: self.id.0,
+            game_line: self.game_line,
+            payload: match self.game_line {
+                GameLine::Skylanders => EntityPayload::Skylanders(SkylandersEntity {
+                    catalog_index: self.catalog_index,
+                    figure_id: self.character_id as u16,
+                    variant_id: self.variant_id.map(|value| value as u16),
+                    kind: self.kind,
+                    image_format: self.image_format,
+                }),
+                GameLine::Infinity => EntityPayload::Infinity(InfinityEntity {
+                    catalog_index: self.catalog_index,
+                    figure_number: self.character_id,
+                    kind: self.kind,
+                    image_format: self.image_format,
+                }),
+            },
+            blob_id: self.blob_id.map(|id| id.0),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

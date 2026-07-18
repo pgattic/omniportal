@@ -148,6 +148,12 @@ impl PortalState {
         self.slots.iter().any(|slot| slot.dirty)
     }
 
+    pub fn has_present_entities(&self) -> bool {
+        self.slots
+            .iter()
+            .any(|slot| slot.active_entity_id.is_some() && slot.slot_status.is_present())
+    }
+
     pub fn is_slot_dirty(&self, slot: u8) -> bool {
         self.slots
             .get(slot as usize)
@@ -640,13 +646,19 @@ mod tests {
     #[test]
     fn loading_entity_holds_added_status_before_ready() {
         let mut state = PortalState::new();
+        assert!(!state.has_present_entities());
         assert!(state.load_entity(42, &[0; FIGURE_IMAGE_BYTES]));
+        assert!(state.has_present_entities());
 
         for _ in 0..PLACEMENT_STATUS_HOLD_REPORTS {
             assert_eq!(state.next_status_report()[1], SlotStatus::Added as u8);
         }
         assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
         assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+        assert!(state.has_present_entities());
+
+        state.clear_entity();
+        assert!(!state.has_present_entities());
     }
 
     #[test]

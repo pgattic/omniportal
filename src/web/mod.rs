@@ -65,7 +65,8 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         .await;
     } else if method == "GET" && path == routes::STATUS_PATH {
         let body = format!(
-            "{{\"mode\":\"skylanders\",\"active_entity\":{},\"active_slots\":{},\"storage\":{}}}\n",
+            "{{\"mode\":\"{}\",\"active_entity\":{},\"active_slots\":{},\"storage\":{}}}\n",
+            crate::storage::usb_mode().wire_name(),
             crate::storage::active_entity_json(),
             crate::storage::active_slots_json(),
             crate::storage::status_json()
@@ -81,6 +82,12 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         .await;
     } else if method == "GET" && path == "/api/catalog" {
         write_catalog(socket, query).await;
+    } else if method == "POST" && path == "/api/mode/set" {
+        write_storage_result(
+            socket,
+            crate::storage::set_usb_mode_from_params(params(query, body).as_str()),
+        )
+        .await;
     } else if method == "POST" && path == "/api/identity/create" {
         write_storage_result(
             socket,
@@ -100,11 +107,17 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         )
         .await;
     } else if method == "POST" && path == "/api/entity/upload" {
-        write_storage_result(
-            socket,
-            crate::storage::upload_entity_from_params(query, body),
-        )
-        .await;
+        println!(
+            "HTTP entity upload: query='{}', bytes={}",
+            query,
+            body.len()
+        );
+        let result = if query.is_empty() {
+            crate::storage::upload_entity_from_form_params(params(query, body).as_str())
+        } else {
+            crate::storage::upload_entity_from_params(query, body)
+        };
+        write_storage_result(socket, result).await;
     } else if method == "POST" && path == "/api/entity/clone" {
         write_storage_result(
             socket,
@@ -136,6 +149,7 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         )
         .await;
     } else if method == "POST" && path == "/api/entity/select" {
+        println!("HTTP entity select: '{}'", params(query, body).as_str());
         write_storage_result(
             socket,
             crate::storage::select_entity_from_params(params(query, body).as_str()),
@@ -182,6 +196,7 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
     const DEFAULT_LIMIT: usize = 30;
     const MAX_LIMIT: usize = 40;
 
+    let game = query_param(query, "game").unwrap_or_else(|| String::from("skylanders"));
     let kind = query_param(query, "kind");
     let search = query_param(query, "q").unwrap_or_default();
     let offset = query_param(query, "offset")
@@ -192,21 +207,62 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
         .unwrap_or(DEFAULT_LIMIT)
         .min(MAX_LIMIT);
 
+    if game == "infinity" {
+        let mut total = 0usize;
+        for entry in crate::figures::infinity::INFINITY_CATALOG {
+            if infinity_catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
+                total += 1;
+            }
+        }
+
+        let body = format!(
+            "{{\"game\":\"infinity\",\"offset\":{},\"limit\":{},\"total\":{},\"figures\":[",
+            offset, limit, total
+        );
+        let mut body = body;
+        let mut emitted = 0usize;
+        let mut seen = 0usize;
+        for entry in crate::figures::infinity::INFINITY_CATALOG {
+            if !infinity_catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
+                continue;
+            }
+            if seen < offset {
+                seen += 1;
+                continue;
+            }
+            if emitted >= limit {
+                break;
+            }
+            if emitted > 0 {
+                body.push(',');
+            }
+            emitted += 1;
+            push_infinity_catalog_entry(&mut body, entry);
+        }
+        body.push_str("]}\n");
+        write_text(socket, "200 OK", "application/json", body.as_str()).await;
+        return;
+    }
+    if game != "skylanders" {
+        write_text(socket, "400 Bad Request", "text/plain", "bad request\n").await;
+        return;
+    }
+
     let mut total = 0usize;
 
-    for entry in crate::figures::catalog::SKYLANDERS_CATALOG {
+    for entry in crate::figures::skylanders::catalog::SKYLANDERS_CATALOG {
         if catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
             total += 1;
         }
     }
 
     let mut body = format!(
-        "{{\"offset\":{},\"limit\":{},\"total\":{},\"skylanders\":[",
+        "{{\"game\":\"skylanders\",\"offset\":{},\"limit\":{},\"total\":{},\"figures\":[",
         offset, limit, total
     );
     let mut emitted = 0usize;
     let mut seen = 0usize;
-    for entry in crate::figures::catalog::SKYLANDERS_CATALOG {
+    for entry in crate::figures::skylanders::catalog::SKYLANDERS_CATALOG {
         if !catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
             continue;
         }
@@ -221,25 +277,69 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
             body.push(',');
         }
         emitted += 1;
-        body.push_str(&format!(
-            "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"character_id\":{},\"variant_id\":{}}}",
-            entry.index,
-            entry.game_line.wire_name(),
-            entry.kind.wire_name(),
-            entry.series,
-            entry.name,
-            entry.character_id,
-            entry.variant_id
-        ));
+        push_skylanders_catalog_entry(&mut body, entry);
     }
 
+    body.push_str("],\"skylanders\":[");
+    emitted = 0;
+    seen = 0;
+    for entry in crate::figures::skylanders::catalog::SKYLANDERS_CATALOG {
+        if !catalog_entry_matches(entry, kind.as_deref(), search.as_str()) {
+            continue;
+        }
+        if seen < offset {
+            seen += 1;
+            continue;
+        }
+        if emitted >= limit {
+            break;
+        }
+        if emitted > 0 {
+            body.push(',');
+        }
+        emitted += 1;
+        push_skylanders_catalog_entry(&mut body, entry);
+    }
     body.push_str("]}\n");
     write_text(socket, "200 OK", "application/json", body.as_str()).await;
 }
 
 #[cfg(target_arch = "xtensa")]
+fn push_skylanders_catalog_entry(
+    body: &mut String,
+    entry: &crate::figures::skylanders::catalog::FigureCatalogEntry,
+) {
+    body.push_str(&format!(
+        "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"character_id\":{},\"variant_id\":{}}}",
+        entry.index,
+        entry.game_line.wire_name(),
+        entry.kind.wire_name(),
+        entry.series,
+        entry.name,
+        entry.character_id,
+        entry.variant_id
+    ));
+}
+
+#[cfg(target_arch = "xtensa")]
+fn push_infinity_catalog_entry(
+    body: &mut String,
+    entry: &crate::figures::infinity::FigureCatalogEntry,
+) {
+    body.push_str(&format!(
+        "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"figure_number\":{}}}",
+        entry.index,
+        entry.game_line.wire_name(),
+        entry.kind.wire_name(),
+        entry.series,
+        entry.name,
+        entry.figure_number
+    ));
+}
+
+#[cfg(target_arch = "xtensa")]
 fn catalog_entry_matches(
-    entry: &crate::figures::catalog::FigureCatalogEntry,
+    entry: &crate::figures::skylanders::catalog::FigureCatalogEntry,
     kind: Option<&str>,
     search: &str,
 ) -> bool {
@@ -255,6 +355,26 @@ fn catalog_entry_matches(
     contains_ascii_case_insensitive(entry.name, search)
         || contains_ascii_case_insensitive(entry.series, search)
         || format!("{}", entry.character_id).contains(search)
+}
+
+#[cfg(target_arch = "xtensa")]
+fn infinity_catalog_entry_matches(
+    entry: &crate::figures::infinity::FigureCatalogEntry,
+    kind: Option<&str>,
+    search: &str,
+) -> bool {
+    if let Some(kind) = kind {
+        if !kind.is_empty() && kind != entry.kind.wire_name() {
+            return false;
+        }
+    }
+    if search.is_empty() {
+        return true;
+    }
+
+    contains_ascii_case_insensitive(entry.name, search)
+        || contains_ascii_case_insensitive(entry.series, search)
+        || format!("{}", entry.figure_number).contains(search)
 }
 
 #[cfg(target_arch = "xtensa")]
@@ -336,6 +456,7 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 #[cfg(target_arch = "xtensa")]
 async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<usize, ()> {
     let mut read = socket.read(buffer).await.map_err(|_| ())?;
+    let mut sent_continue = false;
     loop {
         if let Some(body_start) = body_start(&buffer[..read]) {
             let content_len = content_length(&buffer[..body_start]).unwrap_or(0);
@@ -345,6 +466,10 @@ async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<u
             }
             if needed > buffer.len() {
                 return Err(());
+            }
+            if !sent_continue && expects_continue(&buffer[..body_start]) {
+                write_all(socket, b"HTTP/1.1 100 Continue\r\n\r\n").await;
+                sent_continue = true;
             }
             let chunk = socket
                 .read(&mut buffer[read..needed])
@@ -365,6 +490,23 @@ async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<u
             read += chunk;
         }
     }
+}
+
+pub fn expects_continue(request_headers: &[u8]) -> bool {
+    let Ok(header) = core::str::from_utf8(request_headers) else {
+        return false;
+    };
+    let header = header.split("\r\n\r\n").next().unwrap_or(header);
+    for line in header.lines() {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("expect")
+                && value.trim().eq_ignore_ascii_case("100-continue")
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn split_target(target: &str) -> (&str, &str) {
@@ -480,6 +622,17 @@ mod tests {
         let request = b"POST /api/identity/create HTTP/1.1\r\nhost: portal\r\ncontent-length: 35\r\n\r\nignored";
 
         assert_eq!(content_length(request), Some(35));
+    }
+
+    #[test]
+    fn detects_expect_continue_case_insensitively() {
+        let request =
+            b"POST /api/entity/upload HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 320\r\n\r\n";
+
+        assert!(expects_continue(request));
+        assert!(!expects_continue(
+            b"POST /api/entity/upload HTTP/1.1\r\nContent-Length: 320\r\n\r\n"
+        ));
     }
 
     #[test]

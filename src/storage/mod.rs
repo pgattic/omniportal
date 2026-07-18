@@ -1,14 +1,20 @@
 use core::cell::RefCell;
 
 use crate::config;
-use crate::figures::catalog::{skylanders_catalog_entry, FigureCatalogEntry, SKYLANDERS_CATALOG};
-use crate::figures::formats::ImageFormat;
-use crate::figures::init::{
+use crate::domain::{FigureKind, GameLine, ImageFormat};
+use crate::figures::formats::{INFINITY_IMAGE_BYTES, SKYLANDERS_IMAGE_BYTES};
+use crate::figures::infinity::{
+    find_infinity_catalog_entry, infinity_catalog_entry, infinity_figure_number,
+    initialize_infinity_entity_image,
+};
+use crate::figures::skylanders::catalog::{
+    skylanders_catalog_entry, FigureCatalogEntry as SkylandersCatalogEntry, SKYLANDERS_CATALOG,
+};
+use crate::figures::skylanders::crypto::validate_skylanders_mifare_image;
+use crate::figures::skylanders::image::{
     initialize_mutable_skylanders_entity_image, initialize_skylanders_entity_image,
     rekey_skylanders_entity_image,
 };
-use crate::figures::skylanders_crypto::validate_skylanders_mifare_image;
-use crate::figures::{FigureKind, GameLine};
 #[cfg(target_arch = "xtensa")]
 use crate::platform::println;
 #[cfg(target_arch = "xtensa")]
@@ -174,14 +180,65 @@ pub fn active_slots_marker() -> ([Option<RecordId>; MAX_FIGURES], u32) {
     .unwrap_or(([None; MAX_FIGURES], 0))
 }
 
+pub fn usb_mode() -> GameLine {
+    with_store(|store| store.catalog.usb_mode).unwrap_or(GameLine::Skylanders)
+}
+
+pub fn set_usb_mode_from_params(params: &str) -> Result<String, StorageError> {
+    let mode = query_param(params, "mode")
+        .or_else(|| query_param(params, "game"))
+        .ok_or(StorageError::BadRequest)?;
+    let mode = match mode.as_str() {
+        "skylanders" => GameLine::Skylanders,
+        "infinity" => GameLine::Infinity,
+        _ => return Err(StorageError::BadRequest),
+    };
+
+    with_store_mut(|store| {
+        let changed = store.catalog.usb_mode != mode;
+        if changed {
+            let generation = store.catalog.next_generation();
+            store.catalog.usb_mode = mode;
+            store.catalog.active_slots = [None; MAX_FIGURES];
+            store.catalog.active_config_generation = generation;
+            let payload = encode_config(store.catalog.active_slots, store.catalog.usb_mode);
+            append_record(
+                &mut store.flash,
+                &mut store.catalog,
+                RECORD_KIND_CONFIG_UPSERT,
+                0,
+                generation,
+                &payload,
+            )?;
+        }
+
+        Ok(format!(
+            "{{\"mode\":\"{}\",\"changed\":{},\"reboot_required\":{}}}\n",
+            store.catalog.usb_mode.wire_name(),
+            if changed { "true" } else { "false" },
+            if changed { "true" } else { "false" }
+        ))
+    })
+}
+
 pub fn active_slot_images() -> Result<Vec<(u8, RecordId, Vec<u8>)>, StorageError> {
+    active_slot_images_for_game(GameLine::Skylanders, MAX_FIGURES)
+}
+
+pub fn active_slot_images_for_game(
+    game_line: GameLine,
+    max_slots: usize,
+) -> Result<Vec<(u8, RecordId, Vec<u8>)>, StorageError> {
     with_store_mut(|store| {
         let mut images = Vec::new();
-        for slot in 0..MAX_FIGURES {
+        for slot in 0..MAX_FIGURES.min(max_slots) {
             let Some(id) = store.catalog.active_slots[slot] else {
                 continue;
             };
             let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
+            if entity.game_line != game_line {
+                continue;
+            }
             images.push((slot as u8, id, read_entity_image(store, entity)?));
         }
         Ok(images)
@@ -291,13 +348,23 @@ pub fn create_entity_from_params(params: &str) -> Result<String, StorageError> {
 }
 
 pub fn create_entity_from_catalog_params(params: &str) -> Result<String, StorageError> {
+    let game = parse_game_param(params)?.unwrap_or(GameLine::Skylanders);
     let catalog_index = query_param(params, "catalog_index")
         .and_then(|value| parse_u32(value.as_str()))
         .and_then(|value| u16::try_from(value).ok())
         .ok_or(StorageError::BadRequest)?;
     let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
-    let entry = skylanders_catalog_entry(catalog_index).ok_or(StorageError::NotFound)?;
+    match game {
+        GameLine::Skylanders => create_skylanders_entity_from_catalog(catalog_index, &name),
+        GameLine::Infinity => create_infinity_entity_from_catalog(catalog_index, &name),
+    }
+}
 
+fn create_skylanders_entity_from_catalog(
+    catalog_index: u16,
+    name: &str,
+) -> Result<String, StorageError> {
+    let entry = skylanders_catalog_entry(catalog_index).ok_or(StorageError::NotFound)?;
     with_store_mut(|store| {
         let variant_id = if entry.has_variant() {
             Some(entry.variant_id)
@@ -354,7 +421,63 @@ pub fn create_entity_from_catalog_params(params: &str) -> Result<String, Storage
     })
 }
 
+fn create_infinity_entity_from_catalog(
+    catalog_index: u16,
+    name: &str,
+) -> Result<String, StorageError> {
+    let entry = infinity_catalog_entry(catalog_index).ok_or(StorageError::NotFound)?;
+    with_store_mut(|store| {
+        let entity_id = store.catalog.next_record_id();
+        let image = initialize_infinity_entity_image(entry.figure_number, entity_id.0);
+        let generation = store.catalog.next_generation();
+        let entity = Entity {
+            id: entity_id,
+            name: FixedText::from_str(name).map_err(|_| StorageError::BadRequest)?,
+            parent_identity_id: None,
+            catalog_index: Some(entry.index),
+            game_line: GameLine::Infinity,
+            kind: entry.kind,
+            data_mode: EntityDataMode::StaticGenerated,
+            character_id: entry.figure_number,
+            variant_id: None,
+            blob_id: None,
+            image_format: ImageFormat::InfinityUnknown,
+            image_len: image.len() as u32,
+            image_crc32: crc32(&image),
+            created_generation: generation,
+            updated_generation: generation,
+        };
+        append_entity_record(store, entity)?;
+        Ok(format!(
+            "{{\"created\":\"entity\",\"id\":{},\"catalog_index\":{},\"data_mode\":\"{}\",\"blob_id\":null,\"name\":\"{}\",\"figure\":\"{}\",\"game\":\"{}\"}}\n",
+            entity_id.0,
+            entry.index,
+            entity.data_mode.wire_name(),
+            json_escape(entity.name.as_str()),
+            json_escape(entry.name),
+            entity.game_line.wire_name()
+        ))
+    })
+}
+
 pub fn upload_entity_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
+    let game = parse_game_param(params)?.unwrap_or(GameLine::Skylanders);
+    match game {
+        GameLine::Skylanders => upload_skylanders_entity_from_params(params, image),
+        GameLine::Infinity => upload_infinity_entity_from_params(params, image),
+    }
+}
+
+pub fn upload_entity_from_form_params(params: &str) -> Result<String, StorageError> {
+    let image_hex = query_param(params, "image_hex").ok_or(StorageError::BadRequest)?;
+    let image = decode_hex_bytes(&image_hex).ok_or(StorageError::BadRequest)?;
+    upload_entity_from_params(params, &image)
+}
+
+fn upload_skylanders_entity_from_params(
+    params: &str,
+    image: &[u8],
+) -> Result<String, StorageError> {
     let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
     let identity_id =
         query_param(params, "identity_id").and_then(|value| parse_u32(value.as_str()));
@@ -407,6 +530,53 @@ pub fn upload_entity_from_params(params: &str, image: &[u8]) -> Result<String, S
             option_u32_json(entity.variant_id),
             entity.kind.wire_name(),
             option_str_json(imported.catalog_entry.map(|entry| entry.name))
+        ))
+    })
+}
+
+fn upload_infinity_entity_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
+    let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
+    let imported = ImportedInfinityImage::parse(image).ok_or(StorageError::BadRequest)?;
+    let identity_id =
+        query_param(params, "identity_id").and_then(|value| parse_u32(value.as_str()));
+
+    with_store_mut(|store| {
+        let identity = identity_id.and_then(|id| store.catalog.identity(RecordId(id)));
+        let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
+        let entity_id = store.catalog.next_record_id();
+        let generation = store.catalog.next_generation();
+        let entity = Entity {
+            id: entity_id,
+            name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
+            parent_identity_id: identity.map(|item| item.id),
+            catalog_index: imported.catalog_entry.map(|entry| entry.index),
+            game_line: GameLine::Infinity,
+            kind: identity
+                .map(|item| item.kind)
+                .or_else(|| imported.catalog_entry.map(|entry| entry.kind))
+                .unwrap_or(FigureKind::Character),
+            data_mode: EntityDataMode::MutableImage,
+            character_id: identity
+                .map(|item| item.character_id)
+                .unwrap_or(imported.figure_number),
+            variant_id: None,
+            blob_id: Some(blob_id),
+            image_format: ImageFormat::InfinityUnknown,
+            image_len: image.len() as u32,
+            image_crc32: crc32(image),
+            created_generation: generation,
+            updated_generation: generation,
+        };
+        append_entity_record(store, entity)?;
+        Ok(format!(
+            "{{\"uploaded\":\"entity\",\"id\":{},\"blob_id\":{},\"name\":\"{}\",\"game\":\"{}\",\"format\":\"{}\",\"image_len\":{},\"tag_id\":\"{}\"}}\n",
+            entity_id.0,
+            blob_id.0,
+            json_escape(entity.name.as_str()),
+            entity.game_line.wire_name(),
+            entity.image_format.wire_name(),
+            entity.image_len,
+            hex_bytes(&imported.tag_id)
         ))
     })
 }
@@ -548,8 +718,9 @@ pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
 
     with_store_mut(|store| {
         let id = RecordId(id);
-        if store.catalog.entity(id).is_none() {
-            return Err(StorageError::NotFound);
+        let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
+        if !entity_can_use_active_slot(entity, slot as usize) {
+            return Err(StorageError::BadRequest);
         }
         let generation = store.catalog.next_generation();
         store.catalog.place_entity_in_slot(id, slot as usize);
@@ -688,6 +859,15 @@ pub fn compact_storage() -> Result<String, StorageError> {
         }
 
         store.catalog.active_config_generation = generation;
+        let payload = encode_config(store.catalog.active_slots, store.catalog.usb_mode);
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_CONFIG_UPSERT,
+            0,
+            generation,
+            &payload,
+        )?;
 
         store.catalog.next_generation = generation;
         Ok(format!(
@@ -707,12 +887,13 @@ pub fn format_storage() -> Result<String, StorageError> {
             )
             .map_err(|_| StorageError::Flash)?;
         store.catalog = Catalog::new();
+        let generation = store.catalog.next_generation();
         append_record(
             &mut store.flash,
             &mut store.catalog,
             RECORD_KIND_FORMAT_MARKER,
             0,
-            1,
+            generation,
             b"omniportal-storage-v1",
         )?;
         Ok(String::from("{\"formatted\":true}\n"))
@@ -798,18 +979,31 @@ fn read_entity_image(store: &mut Store, entity: Entity) -> Result<Vec<u8>, Stora
 }
 
 fn generated_entity_image(entity: Entity) -> Vec<u8> {
-    let image =
-        initialize_skylanders_entity_image(entity.character_id, entity.variant_id, entity.id.0);
-    let mut out = Vec::new();
-    out.extend_from_slice(&image);
-    out
+    match entity.game_line {
+        GameLine::Skylanders => {
+            let image = initialize_skylanders_entity_image(
+                entity.character_id,
+                entity.variant_id,
+                entity.id.0,
+            );
+            let mut out = Vec::new();
+            out.extend_from_slice(&image);
+            out
+        }
+        GameLine::Infinity => {
+            let image = initialize_infinity_entity_image(entity.character_id, entity.id.0);
+            let mut out = Vec::new();
+            out.extend_from_slice(&image);
+            out
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ImportedSkylandersImage {
     character_id: u32,
     variant_id: Option<u32>,
-    catalog_entry: Option<&'static FigureCatalogEntry>,
+    catalog_entry: Option<&'static SkylandersCatalogEntry>,
 }
 
 impl ImportedSkylandersImage {
@@ -831,13 +1025,48 @@ impl ImportedSkylandersImage {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ImportedInfinityImage {
+    tag_id: [u8; 7],
+    figure_number: u32,
+    catalog_entry: Option<&'static crate::figures::infinity::FigureCatalogEntry>,
+}
+
+impl ImportedInfinityImage {
+    fn parse(image: &[u8]) -> Option<Self> {
+        if image.len() != INFINITY_IMAGE_BYTES {
+            return None;
+        }
+        let tag_id = image.get(..7)?.try_into().ok()?;
+        let image: &[u8; INFINITY_IMAGE_BYTES] = image.try_into().ok()?;
+        let figure_number = infinity_figure_number(image);
+        Some(Self {
+            tag_id,
+            figure_number,
+            catalog_entry: find_infinity_catalog_entry(figure_number),
+        })
+    }
+}
+
 fn find_skylanders_catalog_entry(
     character_id: u32,
     raw_variant_id: u32,
-) -> Option<&'static FigureCatalogEntry> {
+) -> Option<&'static SkylandersCatalogEntry> {
     SKYLANDERS_CATALOG
         .iter()
         .find(|entry| entry.character_id == character_id && entry.variant_id == raw_variant_id)
+}
+
+fn parse_game_param(params: &str) -> Result<Option<GameLine>, StorageError> {
+    let Some(game) = query_param(params, "game") else {
+        return Ok(None);
+    };
+    match game.as_str() {
+        "" => Ok(None),
+        "skylanders" => Ok(Some(GameLine::Skylanders)),
+        "infinity" => Ok(Some(GameLine::Infinity)),
+        _ => Err(StorageError::BadRequest),
+    }
 }
 
 fn initialize_new_entity_image(
@@ -845,7 +1074,7 @@ fn initialize_new_entity_image(
     character_id: u32,
     variant_id: Option<u32>,
     entity_id: u32,
-) -> [u8; crate::figures::formats::SKYLANDERS_IMAGE_BYTES] {
+) -> [u8; SKYLANDERS_IMAGE_BYTES] {
     if entity_kind_is_mutable(kind) {
         initialize_mutable_skylanders_entity_image(character_id, variant_id, entity_id, kind)
     } else {
@@ -862,6 +1091,16 @@ fn entity_kind_is_mutable(kind: FigureKind) -> bool {
             | FigureKind::Vehicle
             | FigureKind::Trophy
     )
+}
+
+fn entity_can_use_active_slot(entity: Entity, slot: usize) -> bool {
+    match entity.game_line {
+        GameLine::Skylanders => slot < MAX_FIGURES,
+        GameLine::Infinity => match entity.kind {
+            FigureKind::Character | FigureKind::Unknown => slot < 2,
+            _ => slot == 2,
+        },
+    }
 }
 
 fn with_store<R>(f: impl FnOnce(&Store) -> R) -> Option<R> {
@@ -923,6 +1162,7 @@ struct Catalog {
     identities: [Option<CharacterIdentity>; MAX_IDENTITIES],
     entities: [Option<Entity>; MAX_ENTITIES],
     blobs: [Option<StoredBlob>; MAX_ENTITIES],
+    usb_mode: GameLine,
     active_slots: [Option<RecordId>; MAX_FIGURES],
     active_config_generation: u32,
     needs_format: bool,
@@ -939,6 +1179,7 @@ impl Catalog {
             identities: [None; MAX_IDENTITIES],
             entities: [None; MAX_ENTITIES],
             blobs: [None; MAX_ENTITIES],
+            usb_mode: GameLine::Skylanders,
             active_slots: [None; MAX_FIGURES],
             active_config_generation: 0,
             needs_format: false,
@@ -1076,12 +1317,13 @@ impl Catalog {
 
     fn status_json(&self) -> String {
         format!(
-            "{{\"storage\":\"{}\",\"identities\":{},\"entities\":{},\"active_entity_id\":{},\"active_slots\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
+            "{{\"storage\":\"{}\",\"usb_mode\":\"{}\",\"identities\":{},\"entities\":{},\"active_entity_id\":{},\"active_slots\":{},\"used_bytes\":{},\"capacity_bytes\":{},\"corrupt_records\":{}}}",
             if self.needs_format {
                 "needs-format"
             } else {
                 "ok"
             },
+            self.usb_mode.wire_name(),
             self.identity_count(),
             self.entity_count(),
             option_record_id_json(self.active_entity_id()),
@@ -1120,8 +1362,10 @@ impl Catalog {
             first = false;
             let figure_name = entity
                 .catalog_index
-                .and_then(skylanders_catalog_entry)
-                .map(|entry| entry.name);
+                .and_then(|index| match entity.game_line {
+                    GameLine::Skylanders => skylanders_catalog_entry(index).map(|entry| entry.name),
+                    GameLine::Infinity => infinity_catalog_entry(index).map(|entry| entry.name),
+                });
             out.push_str(&format!(
                 "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
                 entity.id.0,
@@ -1300,7 +1544,9 @@ fn apply_record(
         }
         RECORD_KIND_CONFIG_UPSERT => {
             catalog.next_generation = catalog.next_generation.max(record.generation + 1);
-            catalog.active_slots = decode_config(payload);
+            let config = decode_config(payload);
+            catalog.active_slots = config.active_slots;
+            catalog.usb_mode = config.usb_mode;
             catalog.active_config_generation = record.generation;
         }
         _ => {}
@@ -1351,9 +1597,10 @@ fn append_config_record(
     flash: &mut StorageFlash,
     catalog: &mut Catalog,
     active_slots: [Option<RecordId>; MAX_FIGURES],
+    usb_mode: GameLine,
     generation: u32,
 ) -> Result<(), StorageError> {
-    let payload = encode_config(active_slots);
+    let payload = encode_config(active_slots, usb_mode);
     append_record(
         flash,
         catalog,
@@ -1594,19 +1841,45 @@ fn decode_entity(id: u32, _generation: u32, payload: &[u8]) -> Option<Entity> {
     })
 }
 
-#[cfg(test)]
-fn encode_config(active_slots: [Option<RecordId>; MAX_FIGURES]) -> [u8; 4 + MAX_FIGURES * 4] {
-    let mut out = [0; 4 + MAX_FIGURES * 4];
+fn encode_config(
+    active_slots: [Option<RecordId>; MAX_FIGURES],
+    usb_mode: GameLine,
+) -> [u8; 8 + MAX_FIGURES * 4] {
+    let mut out = [0; 8 + MAX_FIGURES * 4];
     out[0..4].copy_from_slice(CONFIG_SLOTS_MAGIC);
+    out[4] = usb_mode.as_u8();
     for (slot, entity_id) in active_slots.iter().enumerate() {
-        let start = 4 + slot * 4;
+        let start = 8 + slot * 4;
         out[start..start + 4].copy_from_slice(&entity_id.map(|id| id.0).unwrap_or(0).to_le_bytes());
     }
     out
 }
 
-fn decode_config(payload: &[u8]) -> [Option<RecordId>; MAX_FIGURES] {
+#[derive(Clone, Copy)]
+struct DecodedConfig {
+    active_slots: [Option<RecordId>; MAX_FIGURES],
+    usb_mode: GameLine,
+}
+
+fn decode_config(payload: &[u8]) -> DecodedConfig {
     let mut active_slots = [None; MAX_FIGURES];
+    let mut usb_mode = GameLine::Skylanders;
+
+    if payload.len() >= 8 + MAX_FIGURES * 4 && &payload[0..4] == CONFIG_SLOTS_MAGIC {
+        usb_mode = GameLine::from_u8(payload[4]).unwrap_or(GameLine::Skylanders);
+        for (slot, active_slot) in active_slots.iter_mut().enumerate() {
+            let start = 8 + slot * 4;
+            let id = u32::from_le_bytes(payload[start..start + 4].try_into().unwrap_or([0; 4]));
+            if id != 0 {
+                *active_slot = Some(RecordId(id));
+            }
+        }
+        return DecodedConfig {
+            active_slots,
+            usb_mode,
+        };
+    }
+
     if payload.len() >= 4 + MAX_FIGURES * 4 && &payload[0..4] == CONFIG_SLOTS_MAGIC {
         for (slot, active_slot) in active_slots.iter_mut().enumerate() {
             let start = 4 + slot * 4;
@@ -1615,7 +1888,10 @@ fn decode_config(payload: &[u8]) -> [Option<RecordId>; MAX_FIGURES] {
                 *active_slot = Some(RecordId(id));
             }
         }
-        return active_slots;
+        return DecodedConfig {
+            active_slots,
+            usb_mode,
+        };
     }
 
     if payload.len() >= 8 && payload[0] != 0 {
@@ -1626,7 +1902,10 @@ fn decode_config(payload: &[u8]) -> [Option<RecordId>; MAX_FIGURES] {
             }
         }
     }
-    active_slots
+    DecodedConfig {
+        active_slots,
+        usb_mode,
+    }
 }
 
 pub fn crc32(bytes: &[u8]) -> u32 {
@@ -1693,6 +1972,20 @@ fn percent_decode(value: &str) -> String {
     out
 }
 
+fn decode_hex_bytes(value: &str) -> Option<Vec<u8>> {
+    let bytes = value.as_bytes();
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::new();
+    for pair in bytes.chunks_exact(2) {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        out.push(high << 4 | low);
+    }
+    Some(out)
+}
+
 fn hex_nibble(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
@@ -1747,10 +2040,20 @@ fn option_str_json(value: Option<&str>) -> String {
         .unwrap_or_else(|| String::from("null"))
 }
 
+fn hex_bytes(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::new();
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::figures::skylanders_crypto::decrypt_figure;
+    use crate::figures::skylanders::crypto::decrypt_figure;
     use crate::usb::skylanders::{handle_command, PortalState, PLACEMENT_STATUS_HOLD_REPORTS};
 
     fn test_identity() -> CharacterIdentity {
@@ -1811,6 +2114,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_game_params_for_catalog_and_import_dispatch() {
+        assert_eq!(parse_game_param(""), Ok(None));
+        assert_eq!(parse_game_param("game="), Ok(None));
+        assert_eq!(
+            parse_game_param("game=skylanders"),
+            Ok(Some(GameLine::Skylanders))
+        );
+        assert_eq!(
+            parse_game_param("game=infinity"),
+            Ok(Some(GameLine::Infinity))
+        );
+        assert_eq!(
+            parse_game_param("game=unknown"),
+            Err(StorageError::BadRequest)
+        );
+    }
+
+    #[test]
     fn rejects_empty_and_oversized_record_text() {
         assert!(FixedText::<8>::from_str("").is_err());
         assert!(FixedText::<8>::from_str("123456789").is_err());
@@ -1866,17 +2187,19 @@ mod tests {
     fn config_payload_supports_legacy_and_multi_slot_records() {
         let legacy = [1, 0, 0, 0, 42, 0, 0, 0];
         let decoded = decode_config(&legacy);
-        assert_eq!(decoded[0], Some(RecordId(42)));
-        assert_eq!(decoded[1], None);
+        assert_eq!(decoded.usb_mode, GameLine::Skylanders);
+        assert_eq!(decoded.active_slots[0], Some(RecordId(42)));
+        assert_eq!(decoded.active_slots[1], None);
 
         let mut active_slots = [None; MAX_FIGURES];
         active_slots[0] = Some(RecordId(8));
         active_slots[3] = Some(RecordId(11));
 
-        let decoded = decode_config(&encode_config(active_slots));
-        assert_eq!(decoded[0], Some(RecordId(8)));
-        assert_eq!(decoded[3], Some(RecordId(11)));
-        assert_eq!(decoded[4], None);
+        let decoded = decode_config(&encode_config(active_slots, GameLine::Infinity));
+        assert_eq!(decoded.usb_mode, GameLine::Infinity);
+        assert_eq!(decoded.active_slots[0], Some(RecordId(8)));
+        assert_eq!(decoded.active_slots[3], Some(RecordId(11)));
+        assert_eq!(decoded.active_slots[4], None);
     }
 
     #[test]
@@ -1889,6 +2212,23 @@ mod tests {
         assert_eq!(catalog.active_slots[0], None);
         assert_eq!(catalog.active_slots[1], Some(RecordId(2)));
         assert_eq!(catalog.active_slots[2], Some(RecordId(1)));
+    }
+
+    #[test]
+    fn infinity_entities_are_limited_to_compatible_active_slots() {
+        let mut character = test_entity();
+        character.game_line = GameLine::Infinity;
+        character.kind = FigureKind::Character;
+
+        assert!(entity_can_use_active_slot(character, 0));
+        assert!(entity_can_use_active_slot(character, 1));
+        assert!(!entity_can_use_active_slot(character, 2));
+
+        let mut disc = character;
+        disc.kind = FigureKind::PowerDisc;
+        assert!(!entity_can_use_active_slot(disc, 0));
+        assert!(!entity_can_use_active_slot(disc, 1));
+        assert!(entity_can_use_active_slot(disc, 2));
     }
 
     #[test]
@@ -1921,6 +2261,42 @@ mod tests {
         let mut bad = image;
         bad[4] ^= 0x01;
         assert_eq!(ImportedSkylandersImage::parse(&bad), None);
+    }
+
+    #[test]
+    fn imported_infinity_images_require_raw_figure_size_and_expose_tag_id() {
+        let image = initialize_infinity_entity_image(0x0f4241, 123);
+
+        let imported = ImportedInfinityImage::parse(&image).unwrap();
+        assert_eq!(imported.tag_id, image[..7]);
+        assert_eq!(imported.figure_number, 0x0f4241);
+        assert_eq!(imported.catalog_entry.unwrap().name, "Mr. Incredible");
+        assert_eq!(hex_bytes(&imported.tag_id).len(), 14);
+
+        assert_eq!(ImportedInfinityImage::parse(&image[..319]), None);
+        let mut oversized = Vec::new();
+        oversized.resize(INFINITY_IMAGE_BYTES + 1, 0);
+        assert_eq!(ImportedInfinityImage::parse(&oversized), None);
+    }
+
+    #[test]
+    fn decodes_form_hex_image_payload() {
+        let mut image = [0u8; INFINITY_IMAGE_BYTES];
+        image[..7].copy_from_slice(&[0x04, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        let params = format!(
+            "game=infinity&name=Mr+Incredible&image_hex={}",
+            hex_bytes(&image)
+        );
+        let image_hex = query_param(&params, "image_hex").unwrap();
+        let decoded = decode_hex_bytes(&image_hex).unwrap();
+
+        assert_eq!(decoded, image);
+        assert_eq!(
+            ImportedInfinityImage::parse(&decoded).unwrap().tag_id,
+            image[..7]
+        );
+        assert_eq!(decode_hex_bytes("abc"), None);
+        assert_eq!(decode_hex_bytes("zz"), None);
     }
 
     #[test]
@@ -2002,6 +2378,47 @@ mod tests {
     }
 
     #[test]
+    fn library_json_resolves_catalog_names_by_game_line() {
+        let mut catalog = Catalog::new();
+        let mut entity = test_entity();
+        entity.game_line = GameLine::Infinity;
+        entity.catalog_index = Some(2);
+        entity.character_id = 0x0f4243;
+        entity.variant_id = None;
+        entity.blob_id = None;
+        entity.image_format = ImageFormat::InfinityUnknown;
+        catalog.upsert_entity(entity).unwrap();
+
+        let json = catalog.library_json();
+        assert!(json.contains("\"figure\":\"Jack Sparrow\""));
+        assert!(!json.contains("Polar Whirlwind"));
+    }
+
+    #[test]
+    fn storage_entities_project_to_game_specific_domain_payloads() {
+        let skylanders = test_entity().domain_entity();
+        let crate::domain::EntityPayload::Skylanders(payload) = skylanders.payload else {
+            panic!("expected skylanders payload");
+        };
+        assert_eq!(skylanders.id, 8);
+        assert_eq!(payload.figure_id, 21);
+        assert_eq!(payload.variant_id, Some(3));
+
+        let mut infinity = test_entity();
+        infinity.game_line = GameLine::Infinity;
+        infinity.character_id = 0x1234_5678;
+        infinity.variant_id = None;
+        infinity.image_format = ImageFormat::InfinityUnknown;
+        let infinity = infinity.domain_entity();
+        let crate::domain::EntityPayload::Infinity(payload) = infinity.payload else {
+            panic!("expected infinity payload");
+        };
+        assert_eq!(payload.figure_number, 0x1234_5678);
+        assert_eq!(payload.kind, FigureKind::Character);
+        assert_eq!(payload.image_format, ImageFormat::InfinityUnknown);
+    }
+
+    #[test]
     fn append_and_scan_flash_rebuilds_catalog_after_reboot() {
         let mut flash = StorageFlash::new();
         let mut catalog = Catalog::new();
@@ -2045,7 +2462,14 @@ mod tests {
         .unwrap();
         let mut active_slots = [None; MAX_FIGURES];
         active_slots[0] = Some(RecordId(8));
-        append_config_record(&mut flash, &mut catalog, active_slots, 5).unwrap();
+        append_config_record(
+            &mut flash,
+            &mut catalog,
+            active_slots,
+            GameLine::Infinity,
+            5,
+        )
+        .unwrap();
 
         let used_bytes = catalog.write_offset;
         let mut rebuilt = Catalog::new();
@@ -2063,9 +2487,33 @@ mod tests {
         assert_eq!(rebuilt.blob(BlobId(2)).unwrap().len, image.len() as u32);
         assert_eq!(rebuilt.active_entity_id(), Some(RecordId(8)));
         assert_eq!(rebuilt.active_slots[0], Some(RecordId(8)));
+        assert_eq!(rebuilt.usb_mode, GameLine::Infinity);
         assert_eq!(rebuilt.next_record_id, 9);
         assert_eq!(rebuilt.next_blob_id, 3);
         assert_eq!(rebuilt.next_generation, 6);
+    }
+
+    #[test]
+    fn formatted_storage_resets_usb_mode_to_factory_default() {
+        let mut flash = StorageFlash::new();
+        let mut catalog = Catalog::new();
+        catalog.usb_mode = GameLine::Infinity;
+        let format_generation = catalog.next_generation();
+        append_record(
+            &mut flash,
+            &mut catalog,
+            RECORD_KIND_FORMAT_MARKER,
+            0,
+            format_generation,
+            b"omniportal-storage-v1",
+        )
+        .unwrap();
+        let mut rebuilt = Catalog::new();
+        scan_flash(&mut flash, &mut rebuilt).unwrap();
+
+        assert_eq!(rebuilt.usb_mode, GameLine::Skylanders);
+        assert_eq!(rebuilt.active_slots, [None; MAX_FIGURES]);
+        assert_eq!(rebuilt.next_generation, 2);
     }
 
     #[test]

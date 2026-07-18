@@ -1,12 +1,12 @@
 pub const DEFAULT_ENTITY_NAME: &str = "Fresh Entity";
 
+use crate::domain::FigureKind;
 use crate::figures::formats::SKYLANDERS_IMAGE_BYTES;
-use crate::figures::skylanders_crypto::{
+use crate::figures::skylanders::crypto::{
     calculate_key_a, checksum_type0, checksum_type1, checksum_type2, checksum_type3,
     checksum_type6, decrypt_figure, encrypt_figure, FIRST_SECTOR_TRAILER_ACL,
     OTHER_SECTOR_TRAILER_ACL,
 };
-use crate::figures::FigureKind;
 
 pub fn initialize_skylanders_placeholder(
     character_id: u32,
@@ -145,7 +145,8 @@ fn initialize_default_save_data(image: &mut [u8; SKYLANDERS_IMAGE_BYTES], kind: 
         | FigureKind::CreationCrystal
         | FigureKind::Vehicle => initialize_character_save_data(image),
         FigureKind::Trophy => initialize_trophy_save_data(image),
-        FigureKind::Item | FigureKind::LevelPiece | FigureKind::Unknown => {}
+        FigureKind::Item | FigureKind::LevelPiece | FigureKind::PowerDisc | FigureKind::Unknown => {
+        }
     }
 }
 
@@ -258,7 +259,7 @@ fn has_nonzero_encrypted_data_blocks(image: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::figures::skylanders_crypto::{
+    use crate::figures::skylanders::crypto::{
         crc16_ccitt_false, validate_generated_image, BLOCK_COUNT, BLOCK_SIZE,
     };
 

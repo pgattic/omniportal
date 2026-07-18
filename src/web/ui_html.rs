@@ -42,16 +42,21 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <h2>Status</h2>
 <div id="status">Loading...</div>
 <div class="row">
+<label>USB Mode<select id="modeSelect">
+<option value="skylanders">Skylanders</option>
+<option value="infinity">Disney Infinity</option>
+</select></label>
+<button onclick="switchMode()">Switch Mode</button>
 <button onclick="refreshAll()">Refresh</button>
 <button onclick="compactStorage()">Compact Storage</button>
 </div>
 </section>
 
 <section>
-<h2>Portal of Power</h2>
+<h2 id="deviceHeading">Active Device</h2>
 <div id="slots" class="slots"></div>
 <div class="actions">
-<button onclick="clearActive()">Clear Portal</button>
+<button id="clearDeviceButton" onclick="clearActive()">Clear Device</button>
 </div>
 </section>
 
@@ -59,6 +64,10 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <h2>Add to Collection</h2>
 <form id="entityForm">
 <div class="row">
+<label>Game<select name="game" id="catalogGame">
+<option value="skylanders">Skylanders</option>
+<option value="infinity">Disney Infinity</option>
+</select></label>
 <label>Type<select id="catalogKind">
 <option value="">All types</option>
 <option value="character">Characters</option>
@@ -68,11 +77,12 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <option value="vehicle">Vehicles</option>
 <option value="creation-crystal">Creation crystals</option>
 <option value="trophy">Trophies</option>
+<option value="power-disc">Power discs</option>
 </select></label>
 <label>Search<input id="catalogSearch" placeholder="Filter catalog"></label>
 </div>
-<label>Figure<select name="catalog_index" id="catalogSelect"></select></label>
-<label>Entity Name<input name="name" required placeholder="Name"></label>
+<label>Catalog Item<select name="catalog_index" id="catalogSelect"></select></label>
+<label>Collection Name<input name="name" required placeholder="Name"></label>
 <button class="primary" type="submit">Add Entity</button>
 <div class="meta" id="catalogCount"></div>
 </form>
@@ -81,7 +91,11 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <section>
 <h2>Import</h2>
 <form id="uploadEntityForm">
-<label>Entity Name<input name="name" required placeholder="Imported entity name"></label>
+<label>Game<select name="game">
+<option value="skylanders">Skylanders</option>
+<option value="infinity">Disney Infinity</option>
+</select></label>
+<label>Collection Name<input name="name" required placeholder="Imported item name"></label>
 <label>Entity Binary<input name="file" type="file" required></label>
 <button type="submit">Import Entity</button>
 </form>
@@ -103,7 +117,13 @@ let library = {identities:[], entities:[], active_entity_id:null, active_slots:[
 let catalog = [];
 let catalogTotal = 0;
 let catalogTimer = 0;
-const portalSlotCount = 8;
+let currentMode = "skylanders";
+const skylandersPortalSlotCount = 8;
+const infinityPortalSlots = [
+  {slot: 0, label: "Player 1", accepts: item => item.game === "infinity" && (item.kind === "character" || item.kind === "unknown")},
+  {slot: 1, label: "Player 2", accepts: item => item.game === "infinity" && (item.kind === "character" || item.kind === "unknown")},
+  {slot: 2, label: "Item / Disc", accepts: item => item.game === "infinity" && item.kind !== "character" && item.kind !== "unknown"}
+];
 
 const $ = id => document.getElementById(id);
 const enc = value => encodeURIComponent(value == null ? "" : value);
@@ -129,23 +149,54 @@ async function refreshAll() {
 }
 
 function renderStatus(status) {
+  currentMode = status.mode || "skylanders";
+  $("modeSelect").value = currentMode;
+  renderDeviceLabels();
   const storage = status.storage || {};
   const slots = status.active_slots || [];
   const used = storage.used_bytes || 0;
   const capacity = storage.capacity_bytes || 0;
   $("status").innerHTML =
     `<div>Mode: ${status.mode || "unknown"}</div>` +
-    `<div>Figures on portal: ${slots.length}</div>` +
+    `<div>${activeItemLabel(true)} on ${deviceName()}: ${slots.length}</div>` +
     `<div>Records: ${storage.entities || 0} entities</div>` +
     `<div>Storage: ${used} / ${capacity} bytes (${storagePercent(used, capacity)})</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
 }
 
+function deviceName(mode = currentMode) {
+  return mode === "infinity" ? "Base" : "Portal of Power";
+}
+
+function activeItemLabel(plural = false, mode = currentMode) {
+  if (mode === "infinity") return plural ? "Toys" : "Toy";
+  return plural ? "Figures" : "Figure";
+}
+
+function renderDeviceLabels() {
+  $("deviceHeading").textContent = deviceName();
+  $("clearDeviceButton").textContent = `Clear ${deviceName()}`;
+}
+
+async function switchMode() {
+  const mode = $("modeSelect").value;
+  const result = await api("/api/mode/set", {method:"POST", body:`mode=${enc(mode)}`});
+  if (result.reboot_required) {
+    say(`${result.mode} mode saved. Reset or reconnect the ESP32 for USB mode to change.`);
+  } else {
+    say(`${result.mode} mode is already active.`);
+  }
+  $("catalogGame").value = result.mode;
+  $("uploadEntityForm").elements.game.value = result.mode;
+  await refreshAll();
+}
+
 async function loadCatalog() {
+  const game = $("catalogGame").value;
   const kind = $("catalogKind").value;
   const search = $("catalogSearch").value.trim();
-  const loaded = await api(`/api/catalog?kind=${enc(kind)}&q=${enc(search)}&limit=30`);
-  catalog = loaded.skylanders || [];
+  const loaded = await api(`/api/catalog?game=${enc(game)}&kind=${enc(kind)}&q=${enc(search)}&limit=30`);
+  catalog = loaded.figures || loaded.skylanders || [];
   catalogTotal = loaded.total || catalog.length;
   renderCatalog();
 }
@@ -182,8 +233,8 @@ function renderEntities() {
     const download = `<a href="/api/entity/${item.id}.bin">Export</a>`;
     const clone = `<button onclick="cloneEntity(${item.id})">Clone</button>`;
     const place_remove = slots.length
-      ? slots.map(slot => `<button onclick="removeSlot(${slot - 1})">Remove from Portal</button>`).join("")
-      : `<button onclick="placeEntityFirstAvailable(${item.id})">Place on Portal</button>`;
+      ? slots.map(slot => `<button onclick="removeSlot(${slot - 1})">Remove from ${deviceName(currentMode)}</button>`).join("")
+      : `<button onclick="placeEntityFirstAvailable(${item.id})">Place on ${deviceName(currentMode)}</button>`;
     return itemShell(
       `#${item.id} ${escapeHtml(item.name)}${active}`,
       entityMeta(item),
@@ -200,7 +251,33 @@ function renderSlots() {
   const entities = library.entities || [];
   const activeSlots = library.active_slots || [];
   const sortedEntities = [...entities].sort((left, right) => left.name.localeCompare(right.name));
-  const activeCards = [...activeSlots]
+  if (currentMode === "infinity") {
+    $("slots").innerHTML = infinityPortalSlots.map(portal => {
+      const active = activeSlots.find(item => Number(item.slot) === portal.slot);
+      const entity = active && entities.find(item => item.id === active.entity_id);
+      if (entity) {
+        return `<div class="slot">` +
+          `<div class="slot-title">${portal.label}</div>` +
+          `<strong>${escapeHtml(entity.name)}</strong>` +
+          `<div class="meta">${entityMeta(entity)}</div>` +
+          `<div class="actions"><button onclick="removeSlot(${portal.slot})">Remove</button></div>` +
+          `</div>`;
+      }
+      const options = entityOptions(sortedEntities.filter(item =>
+        portal.accepts(item) && !activeSlots.some(active => active.entity_id === item.id)
+      ), null);
+      return `<div class="slot empty portal-add">` +
+        `<div class="slot-title">${portal.label}</div>` +
+        `<div class="actions">` +
+        `<select id="portalAddSelect${portal.slot}">${options}</select>` +
+        `<button title="Place on ${deviceName()}" onclick="placePortalAddSelect(${portal.slot})" ${options ? "" : "disabled"}>+</button>` +
+        `</div></div>`;
+    }).join("");
+    return;
+  }
+
+  const visibleActiveSlots = activeSlots.filter(active => Number(active.slot) < skylandersPortalSlotCount);
+  const activeCards = [...visibleActiveSlots]
     .sort((left, right) => Number(left.slot) - Number(right.slot))
     .map(active => {
       const portalIndex = Number(active.slot);
@@ -214,16 +291,16 @@ function renderSlots() {
         `</div></div>`;
     })
     .join("");
-  const availableEntities = sortedEntities.filter(item => !activeSlots.some(active => active.entity_id === item.id));
+  const availableEntities = sortedEntities.filter(item => item.game === "skylanders" && !activeSlots.some(active => active.entity_id === item.id));
   const addCard = firstEmptySlot(activeSlots) == null
-    ? `<div class="slot empty"><div class="slot-title">Portal Full</div><div class="meta">Remove a figure before adding another.</div></div>`
+    ? `<div class="slot empty"><div class="slot-title">${deviceName()} Full</div><div class="meta">Remove a figure before adding another.</div></div>`
     : `<div class="slot empty portal-add">` +
       `<div class="slot-title">Add Figure</div>` +
       `<div class="actions">` +
       `<select id="portalAddSelect">${entityOptions(availableEntities, null)}</select>` +
-      `<button title="Place on Portal" onclick="placePortalAddSelect()" ${availableEntities.length ? "" : "disabled"}>+</button>` +
+      `<button title="Place on ${deviceName()}" onclick="placePortalAddSelect()" ${availableEntities.length ? "" : "disabled"}>+</button>` +
       `</div></div>`;
-  $("slots").innerHTML = (activeCards || "<div class='meta'>Portal is empty.</div>") + addCard;
+  $("slots").innerHTML = (activeCards || `<div class='meta'>${deviceName()} is empty.</div>`) + addCard;
 }
 
 function entityOptions(entities, selectedId) {
@@ -234,10 +311,23 @@ function entityOptions(entities, selectedId) {
 }
 
 function firstEmptySlot(activeSlots) {
-  for (let slot = 0; slot < portalSlotCount; slot++) {
+  for (let slot = 0; slot < skylandersPortalSlotCount; slot++) {
     if (!activeSlots.some(item => Number(item.slot) === slot)) return slot;
   }
   return null;
+}
+
+function firstAvailableSlotForEntity(entity) {
+  const activeSlots = library.active_slots || [];
+  if (currentMode === "infinity") {
+    if (entity.game !== "infinity") return null;
+    const portal = infinityPortalSlots.find(portal =>
+      portal.accepts(entity) && !activeSlots.some(item => Number(item.slot) === portal.slot)
+    );
+    return portal ? portal.slot : null;
+  }
+  if (entity.game !== "skylanders") return null;
+  return firstEmptySlot(activeSlots);
 }
 
 function entityMeta(item) {
@@ -250,6 +340,13 @@ function storagePercent(used, capacity) {
   return `${((used / capacity) * 100).toFixed(1)}%`;
 }
 
+async function fileHex(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let out = "";
+  for (const byte of bytes) out += byte.toString(16).padStart(2, "0");
+  return out;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -259,6 +356,7 @@ function escapeHtml(value) {
 }
 
 $("catalogKind").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
+$("catalogGame").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
 $("catalogSearch").addEventListener("input", () => {
   clearTimeout(catalogTimer);
   catalogTimer = setTimeout(() => loadCatalog().catch(error => say(error.message)), 250);
@@ -278,9 +376,19 @@ $("uploadEntityForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.target;
   const file = form.elements.file.files[0];
-  const query = `name=${enc(form.elements.name.value)}`;
+  if (!file) {
+    say("Choose a binary file to import.");
+    return;
+  }
+  if (form.elements.game.value === "infinity" && file.size !== 320) {
+    say(`Disney Infinity imports must be exactly 320 bytes; selected file is ${file.size} bytes.`);
+    return;
+  }
   try {
-    say(await api(`/api/entity/upload?${query}`, {method:"POST", body: await file.arrayBuffer()}));
+    say(`Uploading ${file.name} (${file.size} bytes)...`);
+    const imageHex = await fileHex(file);
+    const body = `game=${enc(form.elements.game.value)}&name=${enc(form.elements.name.value)}&image_hex=${imageHex}`;
+    say(await api("/api/entity/upload", {method:"POST", body}));
     form.reset();
     await refreshAll();
   } catch (error) { say(error.message); }
@@ -294,26 +402,30 @@ async function post(path, params = "") {
 
 async function placeEntityInSlot(id, slot) {
   const index = Number(slot);
-  if (!Number.isInteger(index) || index < 0 || index >= portalSlotCount) {
-    say("portal target is invalid");
+  const limit = currentMode === "infinity" ? infinityPortalSlots.length : skylandersPortalSlotCount;
+  if (!Number.isInteger(index) || index < 0 || index >= limit) {
+    say(`${deviceName()} target is invalid`);
     return;
   }
   await post("/api/entity/select", `id=${id}&slot=${index}`);
 }
 
 async function placeEntityFirstAvailable(id) {
-  const slot = firstEmptySlot(library.active_slots || []);
+  const entity = (library.entities || []).find(item => item.id === id);
+  const slot = entity ? firstAvailableSlotForEntity(entity) : null;
   if (slot == null) {
-    say("the portal is full");
+    say(`no compatible ${deviceName()} position is available`);
     return;
   }
   await placeEntityInSlot(id, slot);
 }
 
-async function placePortalAddSelect() {
-  const id = Number($("portalAddSelect").value);
+async function placePortalAddSelect(slot = null) {
+  const select = slot == null ? $("portalAddSelect") : $(`portalAddSelect${slot}`);
+  const id = Number(select.value);
   if (!Number.isInteger(id)) return;
-  await placeEntityFirstAvailable(id);
+  if (slot == null) await placeEntityFirstAvailable(id);
+  else await placeEntityInSlot(id, slot);
 }
 
 async function removeSlot(slot) {

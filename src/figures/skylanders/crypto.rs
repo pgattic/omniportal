@@ -308,7 +308,7 @@ fn md5_process_block(
     *d0 = d0.wrapping_add(d);
 }
 
-fn aes128_encrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+pub(crate) fn aes128_encrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
     let round_keys = aes128_key_expansion(key);
     let mut state = *block;
     add_round_key(&mut state, &round_keys[0..16]);
@@ -326,7 +326,7 @@ fn aes128_encrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
     state
 }
 
-fn aes128_decrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
+pub(crate) fn aes128_decrypt_block(block: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
     let round_keys = aes128_key_expansion(key);
     let mut state = *block;
     add_round_key(&mut state, &round_keys[160..176]);
@@ -653,14 +653,16 @@ mod tests {
 
     #[test]
     fn generated_blank_image_decrypts_to_itself() {
-        let image = crate::figures::init::initialize_skylanders_entity_image(21, None, 1);
+        let image =
+            crate::figures::skylanders::image::initialize_skylanders_entity_image(21, None, 1);
 
         assert_eq!(decrypt_figure(&image), image);
     }
 
     #[test]
     fn figure_encrypt_decrypt_round_trips_data_blocks() {
-        let mut plaintext = crate::figures::init::initialize_skylanders_entity_image(21, None, 1);
+        let mut plaintext =
+            crate::figures::skylanders::image::initialize_skylanders_entity_image(21, None, 1);
 
         for block_index in 8..BLOCK_COUNT {
             if is_plaintext_block(block_index) {
