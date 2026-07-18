@@ -153,6 +153,10 @@ pub struct InfinityBaseState {
     figures: [FigureSlot; MAX_FIGURES],
     next_order: u8,
     queued_changes: [Option<Report>; MAX_FIGURES * 2],
+    random_a: u32,
+    random_b: u32,
+    random_c: u32,
+    random_d: u32,
 }
 
 impl InfinityBaseState {
@@ -161,6 +165,10 @@ impl InfinityBaseState {
             figures: [FigureSlot::new(); MAX_FIGURES],
             next_order: 0,
             queued_changes: [None; MAX_FIGURES * 2],
+            random_a: 0,
+            random_b: 0,
+            random_c: 0,
+            random_d: 0,
         }
     }
 
@@ -267,6 +275,27 @@ impl InfinityBaseState {
         report
     }
 
+    pub fn descramble_and_seed_response(&mut self, packet: &Report, sequence: u8) -> Report {
+        let scrambled = u64::from_be_bytes([
+            packet[4], packet[5], packet[6], packet[7], packet[8], packet[9], packet[10],
+            packet[11],
+        ]);
+        self.generate_seed(descramble(scrambled));
+        blank_response(sequence)
+    }
+
+    pub fn next_random_response(&mut self, sequence: u8) -> Report {
+        let scrambled = scramble(self.next_random(), 0);
+        let bytes = scrambled.to_be_bytes();
+        let mut report = [0; REPORT_BYTES];
+        report[0] = 0xaa;
+        report[1] = 0x09;
+        report[2] = sequence;
+        report[3..11].copy_from_slice(&bytes);
+        report[11] = checksum(&report, 11);
+        report
+    }
+
     pub fn figure_image(&self, position: FigurePosition) -> Option<&FigureImage> {
         let figure = &self.figures[position.index()];
         figure.present.then_some(&figure.data)
@@ -304,6 +333,38 @@ impl InfinityBaseState {
             .iter_mut()
             .find(|figure| figure.present && figure.order_added == order_added)
     }
+
+    fn generate_seed(&mut self, seed: u32) {
+        self.random_a = 0xf1ea_5eed;
+        self.random_b = seed;
+        self.random_c = seed;
+        self.random_d = seed;
+
+        for _ in 0..23 {
+            self.next_random();
+        }
+    }
+
+    fn next_random(&mut self) -> u32 {
+        let mut a = self.random_a;
+        let mut b = self.random_b;
+        let mut c = self.random_c;
+        let ret = self.random_b.rotate_left(27);
+
+        let temp = a.wrapping_add((ret ^ 0xffff_ffff).wrapping_add(1));
+        b ^= c.rotate_left(17);
+        a = self.random_d;
+        c = c.wrapping_add(a);
+        let ret = b.wrapping_add(temp);
+        a = a.wrapping_add(temp);
+
+        self.random_c = a;
+        self.random_a = b;
+        self.random_b = c;
+        self.random_d = ret;
+
+        ret
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -323,8 +384,9 @@ pub fn handle_command_packet(
     let sequence = packet[3];
     let response = match command {
         0x80 => ACTIVATE_RESPONSE,
-        0x81 | 0x90 | 0x92 | 0x93 | 0x95 | 0x96 | 0xb5 => blank_response(sequence),
-        0x83 => deterministic_random_response(sequence),
+        0x81 => state.descramble_and_seed_response(packet, sequence),
+        0x90 | 0x92 | 0x93 | 0x95 | 0x96 | 0xb5 => blank_response(sequence),
+        0x83 => state.next_random_response(sequence),
         0xa1 => state.present_figures_response(sequence),
         0xa2 => state.query_block_response(packet[4], packet[5], sequence),
         0xa3 => state.write_block_response(packet[4], packet[5], &packet[7..23], sequence),
@@ -346,13 +408,40 @@ pub fn blank_response(sequence: u8) -> Report {
     report
 }
 
-pub fn deterministic_random_response(sequence: u8) -> Report {
-    let mut report = [0; REPORT_BYTES];
-    report[0] = 0xaa;
-    report[1] = 0x09;
-    report[2] = sequence;
-    report[11] = checksum(&report, 11);
-    report
+pub fn scramble(mut num_to_scramble: u32, mut garbage: u32) -> u64 {
+    let mut mask = 0x8e55_aa1b_3999_e8aau64;
+    let mut ret = 0u64;
+
+    for _ in 0..64 {
+        ret <<= 1;
+        if mask & 1 != 0 {
+            ret |= u64::from(num_to_scramble & 1);
+            num_to_scramble >>= 1;
+        } else {
+            ret |= u64::from(garbage & 1);
+            garbage >>= 1;
+        }
+        mask >>= 1;
+    }
+
+    ret
+}
+
+pub fn descramble(mut num_to_descramble: u64) -> u32 {
+    let mut mask = 0x8e55_aa1b_3999_e8aau64;
+    let mut ret = 0u32;
+    let mut ret_mask = 0x8000_0000u32;
+
+    for _ in 0..64 {
+        if mask & 0x8000_0000_0000_0000 != 0 {
+            ret |= ((num_to_descramble & 1) as u32) * ret_mask;
+            ret_mask >>= 1;
+        }
+        num_to_descramble >>= 1;
+        mask <<= 1;
+    }
+
+    ret
 }
 
 pub fn checksum(report: &Report, bytes: usize) -> u8 {
@@ -467,6 +556,28 @@ mod tests {
 
         assert_eq!(&packet[..5], &[0xff, 0x02, 0xa1, 0x42, 0xe4]);
         assert!(valid_command_packet(&packet));
+    }
+
+    #[test]
+    fn random_seed_commands_follow_dolphin_scramble_flow() {
+        for value in [0, 1, 0x1234_5678, 0x9eb3_cd88, u32::MAX] {
+            assert_eq!(descramble(scramble(value, 0)), value);
+        }
+
+        let mut state = InfinityBaseState::new();
+        let seed = scramble(0x1234_5678, 0).to_be_bytes();
+        let seed_response =
+            handle_command_packet(&mut state, &command_packet(0x81, 0x10, &seed).unwrap()).unwrap();
+        assert_eq!(&seed_response.response[..4], &[0xaa, 0x01, 0x10, 0xbb]);
+
+        let random_response =
+            handle_command_packet(&mut state, &command_packet(0x83, 0x11, &[]).unwrap()).unwrap();
+        assert_eq!(&random_response.response[..3], &[0xaa, 0x09, 0x11]);
+        assert_ne!(&random_response.response[3..11], &[0; 8]);
+        assert_eq!(
+            random_response.response[11],
+            checksum(&random_response.response, 11)
+        );
     }
 
     #[test]

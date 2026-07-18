@@ -23,6 +23,8 @@ use crate::{
 
 const REPORT_QUEUE_LEN: usize = 32;
 const STORAGE_POLL_TICKS: u8 = 50;
+#[cfg(feature = "usb-infinity")]
+const INFINITY_CHANGE_REPORT_REPEATS: usize = 4;
 const STORAGE_WRITE_DEBOUNCE: Duration =
     Duration::from_millis(crate::storage::wear::DEFAULT_COMMIT_DEBOUNCE_MS as u64);
 #[cfg(not(feature = "usb-infinity"))]
@@ -448,7 +450,18 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
     fn poll_in_endpoint(&mut self) {
         if let Some(report) = self.pop_report() {
             match self.ep_in.write(&report) {
-                Ok(_) => {}
+                Ok(_) => {
+                    println!(
+                        "Disney Infinity USB sent report: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                        report[0],
+                        report[1],
+                        report[2],
+                        report[3],
+                        report[4],
+                        report[5],
+                        report[6]
+                    );
+                }
                 Err(UsbError::WouldBlock) => {
                     self.push_report_front(report);
                 }
@@ -466,19 +479,7 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
         match report[0] {
             0x00 => {}
             0xaa | 0xab => {
-                if let Some(change) = self.state.pop_change_response() {
-                    println!(
-                        "Disney Infinity USB sending change report: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                        change[0],
-                        change[1],
-                        change[2],
-                        change[3],
-                        change[4],
-                        change[5],
-                        change[6]
-                    );
-                    self.push_report_front(change);
-                }
+                self.queue_pending_change_reports();
             }
             0xff => {
                 let command = report[2];
@@ -542,6 +543,7 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
                                 self.active_entity_ids[slot].unwrap_or(0)
                             );
                             self.state.remove_figure(position);
+                            self.queue_pending_change_reports();
                         }
                         self.active_entity_ids[slot] = None;
                         self.dirty_slots[slot] = false;
@@ -566,6 +568,7 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
                             id.0,
                             image.len()
                         );
+                        self.queue_pending_change_reports();
                     } else {
                         println!(
                             "Disney Infinity USB rejected slot {} entity {} image length {}",
@@ -574,6 +577,7 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
                             image.len()
                         );
                         self.state.remove_figure(position);
+                        self.queue_pending_change_reports();
                         self.active_entity_ids[slot as usize] = None;
                         self.dirty_slots[slot as usize] = false;
                     }
@@ -674,6 +678,7 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
         for slot in 0..infinity::MAX_FIGURES {
             if let Some(position) = infinity::FigurePosition::from_portal_index(slot as u8) {
                 self.state.remove_figure(position);
+                self.queue_pending_change_reports();
             }
             self.active_entity_ids[slot] = None;
             self.dirty_slots[slot] = false;
@@ -689,6 +694,24 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
         }
         println!("Disney Infinity USB response queue full; dropping oldest response");
         self.queue[REPORT_QUEUE_LEN - 1] = Some(report);
+    }
+
+    fn queue_pending_change_reports(&mut self) {
+        while let Some(change) = self.state.pop_change_response() {
+            println!(
+                "Disney Infinity USB queueing change report: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                change[0],
+                change[1],
+                change[2],
+                change[3],
+                change[4],
+                change[5],
+                change[6]
+            );
+            for _ in 0..INFINITY_CHANGE_REPORT_REPEATS {
+                self.push_report_front(change);
+            }
+        }
     }
 
     fn push_report_front(&mut self, report: infinity::Report) {
