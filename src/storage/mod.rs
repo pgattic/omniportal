@@ -508,7 +508,7 @@ fn upload_infinity_entity_from_params(params: &str, image: &[u8]) -> Result<Stri
             game_line: GameLine::Infinity,
             kind: identity
                 .map(|item| item.kind)
-                .unwrap_or(FigureKind::Unknown),
+                .unwrap_or(FigureKind::Character),
             data_mode: EntityDataMode::MutableImage,
             character_id: identity
                 .map(|item| item.character_id)
@@ -672,8 +672,9 @@ pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
 
     with_store_mut(|store| {
         let id = RecordId(id);
-        if store.catalog.entity(id).is_none() {
-            return Err(StorageError::NotFound);
+        let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
+        if !entity_can_use_active_slot(entity, slot as usize) {
+            return Err(StorageError::BadRequest);
         }
         let generation = store.catalog.next_generation();
         store.catalog.place_entity_in_slot(id, slot as usize);
@@ -1025,6 +1026,16 @@ fn entity_kind_is_mutable(kind: FigureKind) -> bool {
             | FigureKind::Vehicle
             | FigureKind::Trophy
     )
+}
+
+fn entity_can_use_active_slot(entity: Entity, slot: usize) -> bool {
+    match entity.game_line {
+        GameLine::Skylanders => slot < MAX_FIGURES,
+        GameLine::Infinity => match entity.kind {
+            FigureKind::Character | FigureKind::Unknown => slot < 2,
+            _ => slot == 2,
+        },
+    }
 }
 
 fn with_store<R>(f: impl FnOnce(&Store) -> R) -> Option<R> {
@@ -2094,6 +2105,23 @@ mod tests {
         assert_eq!(catalog.active_slots[0], None);
         assert_eq!(catalog.active_slots[1], Some(RecordId(2)));
         assert_eq!(catalog.active_slots[2], Some(RecordId(1)));
+    }
+
+    #[test]
+    fn infinity_entities_are_limited_to_compatible_active_slots() {
+        let mut character = test_entity();
+        character.game_line = GameLine::Infinity;
+        character.kind = FigureKind::Character;
+
+        assert!(entity_can_use_active_slot(character, 0));
+        assert!(entity_can_use_active_slot(character, 1));
+        assert!(!entity_can_use_active_slot(character, 2));
+
+        let mut disc = character;
+        disc.kind = FigureKind::PowerDisc;
+        assert!(!entity_can_use_active_slot(disc, 0));
+        assert!(!entity_can_use_active_slot(disc, 1));
+        assert!(entity_can_use_active_slot(disc, 2));
     }
 
     #[test]

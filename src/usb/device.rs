@@ -515,6 +515,11 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
                         if let Some(position) =
                             infinity::FigurePosition::from_portal_index(slot as u8)
                         {
+                            println!(
+                                "Disney Infinity USB removing position {} entity {}",
+                                slot,
+                                self.active_entity_ids[slot].unwrap_or(0)
+                            );
                             self.state.remove_figure(position);
                         }
                         self.active_entity_ids[slot] = None;
@@ -534,6 +539,12 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
                         self.active_entity_ids[slot as usize] = Some(id.0);
                         self.dirty_slots[slot as usize] = false;
                         loaded += 1;
+                        println!(
+                            "Disney Infinity USB loaded position {} entity {} ({} bytes)",
+                            slot,
+                            id.0,
+                            image.len()
+                        );
                     } else {
                         println!(
                             "Disney Infinity USB rejected slot {} entity {} image length {}",

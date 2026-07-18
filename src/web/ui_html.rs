@@ -112,7 +112,13 @@ let library = {identities:[], entities:[], active_entity_id:null, active_slots:[
 let catalog = [];
 let catalogTotal = 0;
 let catalogTimer = 0;
-const portalSlotCount = 8;
+let currentMode = "skylanders";
+const skylandersPortalSlotCount = 8;
+const infinityPortalSlots = [
+  {slot: 0, label: "Player 1", accepts: item => item.game === "infinity" && (item.kind === "character" || item.kind === "unknown")},
+  {slot: 1, label: "Player 2", accepts: item => item.game === "infinity" && (item.kind === "character" || item.kind === "unknown")},
+  {slot: 2, label: "Item / Disc", accepts: item => item.game === "infinity" && item.kind !== "character" && item.kind !== "unknown"}
+];
 
 const $ = id => document.getElementById(id);
 const enc = value => encodeURIComponent(value == null ? "" : value);
@@ -138,6 +144,7 @@ async function refreshAll() {
 }
 
 function renderStatus(status) {
+  currentMode = status.mode || "skylanders";
   const storage = status.storage || {};
   const slots = status.active_slots || [];
   const used = storage.used_bytes || 0;
@@ -210,7 +217,33 @@ function renderSlots() {
   const entities = library.entities || [];
   const activeSlots = library.active_slots || [];
   const sortedEntities = [...entities].sort((left, right) => left.name.localeCompare(right.name));
-  const activeCards = [...activeSlots]
+  if (currentMode === "infinity") {
+    $("slots").innerHTML = infinityPortalSlots.map(portal => {
+      const active = activeSlots.find(item => Number(item.slot) === portal.slot);
+      const entity = active && entities.find(item => item.id === active.entity_id);
+      if (entity) {
+        return `<div class="slot">` +
+          `<div class="slot-title">${portal.label}</div>` +
+          `<strong>${escapeHtml(entity.name)}</strong>` +
+          `<div class="meta">${entityMeta(entity)}</div>` +
+          `<div class="actions"><button onclick="removeSlot(${portal.slot})">Remove</button></div>` +
+          `</div>`;
+      }
+      const options = entityOptions(sortedEntities.filter(item =>
+        portal.accepts(item) && !activeSlots.some(active => active.entity_id === item.id)
+      ), null);
+      return `<div class="slot empty portal-add">` +
+        `<div class="slot-title">${portal.label}</div>` +
+        `<div class="actions">` +
+        `<select id="portalAddSelect${portal.slot}">${options}</select>` +
+        `<button title="Place on Portal" onclick="placePortalAddSelect(${portal.slot})" ${options ? "" : "disabled"}>+</button>` +
+        `</div></div>`;
+    }).join("");
+    return;
+  }
+
+  const visibleActiveSlots = activeSlots.filter(active => Number(active.slot) < skylandersPortalSlotCount);
+  const activeCards = [...visibleActiveSlots]
     .sort((left, right) => Number(left.slot) - Number(right.slot))
     .map(active => {
       const portalIndex = Number(active.slot);
@@ -224,7 +257,7 @@ function renderSlots() {
         `</div></div>`;
     })
     .join("");
-  const availableEntities = sortedEntities.filter(item => !activeSlots.some(active => active.entity_id === item.id));
+  const availableEntities = sortedEntities.filter(item => item.game === "skylanders" && !activeSlots.some(active => active.entity_id === item.id));
   const addCard = firstEmptySlot(activeSlots) == null
     ? `<div class="slot empty"><div class="slot-title">Portal Full</div><div class="meta">Remove a figure before adding another.</div></div>`
     : `<div class="slot empty portal-add">` +
@@ -244,10 +277,23 @@ function entityOptions(entities, selectedId) {
 }
 
 function firstEmptySlot(activeSlots) {
-  for (let slot = 0; slot < portalSlotCount; slot++) {
+  for (let slot = 0; slot < skylandersPortalSlotCount; slot++) {
     if (!activeSlots.some(item => Number(item.slot) === slot)) return slot;
   }
   return null;
+}
+
+function firstAvailableSlotForEntity(entity) {
+  const activeSlots = library.active_slots || [];
+  if (currentMode === "infinity") {
+    if (entity.game !== "infinity") return null;
+    const portal = infinityPortalSlots.find(portal =>
+      portal.accepts(entity) && !activeSlots.some(item => Number(item.slot) === portal.slot)
+    );
+    return portal ? portal.slot : null;
+  }
+  if (entity.game !== "skylanders") return null;
+  return firstEmptySlot(activeSlots);
 }
 
 function entityMeta(item) {
@@ -322,7 +368,8 @@ async function post(path, params = "") {
 
 async function placeEntityInSlot(id, slot) {
   const index = Number(slot);
-  if (!Number.isInteger(index) || index < 0 || index >= portalSlotCount) {
+  const limit = currentMode === "infinity" ? infinityPortalSlots.length : skylandersPortalSlotCount;
+  if (!Number.isInteger(index) || index < 0 || index >= limit) {
     say("portal target is invalid");
     return;
   }
@@ -330,18 +377,21 @@ async function placeEntityInSlot(id, slot) {
 }
 
 async function placeEntityFirstAvailable(id) {
-  const slot = firstEmptySlot(library.active_slots || []);
+  const entity = (library.entities || []).find(item => item.id === id);
+  const slot = entity ? firstAvailableSlotForEntity(entity) : null;
   if (slot == null) {
-    say("the portal is full");
+    say("no compatible portal position is available");
     return;
   }
   await placeEntityInSlot(id, slot);
 }
 
-async function placePortalAddSelect() {
-  const id = Number($("portalAddSelect").value);
+async function placePortalAddSelect(slot = null) {
+  const select = slot == null ? $("portalAddSelect") : $(`portalAddSelect${slot}`);
+  const id = Number(select.value);
   if (!Number.isInteger(id)) return;
-  await placeEntityFirstAvailable(id);
+  if (slot == null) await placeEntityFirstAvailable(id);
+  else await placeEntityInSlot(id, slot);
 }
 
 async function removeSlot(slot) {
