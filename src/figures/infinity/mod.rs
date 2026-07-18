@@ -635,6 +635,12 @@ pub fn infinity_catalog_entry(index: u16) -> Option<&'static FigureCatalogEntry>
     INFINITY_CATALOG.get(index as usize)
 }
 
+pub fn find_infinity_catalog_entry(figure_number: u32) -> Option<&'static FigureCatalogEntry> {
+    INFINITY_CATALOG
+        .iter()
+        .find(|entry| entry.figure_number == figure_number)
+}
+
 pub fn initialize_infinity_entity_image(
     figure_number: u32,
     entity_id: u32,
@@ -670,6 +676,11 @@ pub fn decrypt_infinity_figure_data(image: &[u8; INFINITY_IMAGE_BYTES]) -> [u8; 
     let mut encrypted = [0; BLOCK_BYTES];
     encrypted.copy_from_slice(&image[0x10..0x20]);
     aes128_decrypt_block(&encrypted, &key)
+}
+
+pub fn infinity_figure_number(image: &[u8; INFINITY_IMAGE_BYTES]) -> u32 {
+    let figure_data = decrypt_infinity_figure_data(image);
+    (u32::from(figure_data[1]) << 16) | (u32::from(figure_data[2]) << 8) | u32::from(figure_data[3])
 }
 
 fn write_access_bytes(image: &mut [u8; INFINITY_IMAGE_BYTES], sector: usize, access: u32) {
@@ -838,6 +849,11 @@ mod tests {
         assert_eq!(
             u32::from_be_bytes(figure_data[12..16].try_into().unwrap()),
             infinity_crc32_12(&figure_data)
+        );
+        assert_eq!(infinity_figure_number(&image), 0x0f4241);
+        assert_eq!(
+            find_infinity_catalog_entry(infinity_figure_number(&image)).map(|entry| entry.name),
+            Some("Mr. Incredible")
         );
     }
 }

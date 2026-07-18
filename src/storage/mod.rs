@@ -3,7 +3,10 @@ use core::cell::RefCell;
 use crate::config;
 use crate::domain::{FigureKind, GameLine, ImageFormat};
 use crate::figures::formats::{INFINITY_IMAGE_BYTES, SKYLANDERS_IMAGE_BYTES};
-use crate::figures::infinity::{infinity_catalog_entry, initialize_infinity_entity_image};
+use crate::figures::infinity::{
+    find_infinity_catalog_entry, infinity_catalog_entry, infinity_figure_number,
+    initialize_infinity_entity_image,
+};
 use crate::figures::skylanders::catalog::{
     skylanders_catalog_entry, FigureCatalogEntry as SkylandersCatalogEntry, SKYLANDERS_CATALOG,
 };
@@ -505,10 +508,11 @@ fn upload_infinity_entity_from_params(params: &str, image: &[u8]) -> Result<Stri
             id: entity_id,
             name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
             parent_identity_id: identity.map(|item| item.id),
-            catalog_index: None,
+            catalog_index: imported.catalog_entry.map(|entry| entry.index),
             game_line: GameLine::Infinity,
             kind: identity
                 .map(|item| item.kind)
+                .or_else(|| imported.catalog_entry.map(|entry| entry.kind))
                 .unwrap_or(FigureKind::Character),
             data_mode: EntityDataMode::MutableImage,
             character_id: identity
@@ -974,6 +978,7 @@ impl ImportedSkylandersImage {
 struct ImportedInfinityImage {
     tag_id: [u8; 7],
     figure_number: u32,
+    catalog_entry: Option<&'static crate::figures::infinity::FigureCatalogEntry>,
 }
 
 impl ImportedInfinityImage {
@@ -982,9 +987,12 @@ impl ImportedInfinityImage {
             return None;
         }
         let tag_id = image.get(..7)?.try_into().ok()?;
+        let image: &[u8; INFINITY_IMAGE_BYTES] = image.try_into().ok()?;
+        let figure_number = infinity_figure_number(image);
         Some(Self {
             tag_id,
-            figure_number: 0,
+            figure_number,
+            catalog_entry: find_infinity_catalog_entry(figure_number),
         })
     }
 }
@@ -2166,13 +2174,13 @@ mod tests {
 
     #[test]
     fn imported_infinity_images_require_raw_figure_size_and_expose_tag_id() {
-        let mut image = [0u8; INFINITY_IMAGE_BYTES];
-        image[..7].copy_from_slice(&[0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6]);
+        let image = initialize_infinity_entity_image(0x0f4241, 123);
 
         let imported = ImportedInfinityImage::parse(&image).unwrap();
-        assert_eq!(imported.tag_id, [0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6]);
-        assert_eq!(imported.figure_number, 0);
-        assert_eq!(hex_bytes(&imported.tag_id), String::from("04a1b2c3d4e5f6"));
+        assert_eq!(imported.tag_id, image[..7]);
+        assert_eq!(imported.figure_number, 0x0f4241);
+        assert_eq!(imported.catalog_entry.unwrap().name, "Mr. Incredible");
+        assert_eq!(hex_bytes(&imported.tag_id).len(), 14);
 
         assert_eq!(ImportedInfinityImage::parse(&image[..319]), None);
         let mut oversized = Vec::new();
