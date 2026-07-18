@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-// Protocol constants and packet helpers are defined before the USB device stack is wired up.
-
 pub const VID: u16 = 0x1430;
 pub const PID: u16 = 0x0150;
 

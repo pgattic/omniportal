@@ -5,7 +5,6 @@ extern crate alloc;
 pub mod config;
 pub mod domain;
 pub mod figures;
-pub mod state;
 pub mod storage;
 pub mod usb;
 pub mod web;

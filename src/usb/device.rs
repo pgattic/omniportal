@@ -22,6 +22,7 @@ use crate::{
 const REPORT_QUEUE_LEN: usize = 32;
 const STORAGE_POLL_TICKS: u8 = 50;
 const INFINITY_CHANGE_REPORT_REPEATS: usize = 4;
+const USB_TRACE_PACKETS: bool = false;
 const STORAGE_WRITE_DEBOUNCE: Duration =
     Duration::from_millis(crate::storage::wear::DEFAULT_COMMIT_DEBOUNCE_MS as u64);
 
@@ -467,16 +468,18 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
         if let Some(report) = self.pop_report() {
             match self.ep_in.write(&report) {
                 Ok(_) => {
-                    println!(
-                        "Disney Infinity USB sent report: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                        report[0],
-                        report[1],
-                        report[2],
-                        report[3],
-                        report[4],
-                        report[5],
-                        report[6]
-                    );
+                    if USB_TRACE_PACKETS {
+                        println!(
+                            "Disney Infinity USB sent report: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                            report[0],
+                            report[1],
+                            report[2],
+                            report[3],
+                            report[4],
+                            report[5],
+                            report[6]
+                        );
+                    }
                 }
                 Err(UsbError::WouldBlock) => {
                     self.push_report_front(report);
@@ -501,15 +504,17 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
                 let command = report[2];
                 let order_added = report[4];
                 if let Some(response) = infinity::handle_command_packet(&mut self.state, report) {
-                    println!(
-                        "Disney Infinity USB cmd=0x{:02x} seq=0x{:02x} rsp={:02x} {:02x} {:02x} {:02x}",
-                        command,
-                        report[3],
-                        response.response[0],
-                        response.response[1],
-                        response.response[2],
-                        response.response[3]
-                    );
+                    if USB_TRACE_PACKETS {
+                        println!(
+                            "Disney Infinity USB cmd=0x{:02x} seq=0x{:02x} rsp={:02x} {:02x} {:02x} {:02x}",
+                            command,
+                            report[3],
+                            response.response[0],
+                            response.response[1],
+                            response.response[2],
+                            response.response[3]
+                        );
+                    }
                     self.push_report(response.echo);
                     self.push_report(response.response);
                     if command == 0xa3 {
@@ -714,16 +719,18 @@ impl<'a, B: usb_device::bus::UsbBus> InfinityBaseClass<'a, B> {
 
     fn queue_pending_change_reports(&mut self) {
         while let Some(change) = self.state.pop_change_response() {
-            println!(
-                "Disney Infinity USB queueing change report: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
-                change[0],
-                change[1],
-                change[2],
-                change[3],
-                change[4],
-                change[5],
-                change[6]
-            );
+            if USB_TRACE_PACKETS {
+                println!(
+                    "Disney Infinity USB queueing change report: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                    change[0],
+                    change[1],
+                    change[2],
+                    change[3],
+                    change[4],
+                    change[5],
+                    change[6]
+                );
+            }
             for _ in 0..INFINITY_CHANGE_REPORT_REPEATS {
                 self.push_report_front(change);
             }
