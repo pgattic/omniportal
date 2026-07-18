@@ -29,6 +29,8 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 .slot{border:1px solid #ddd;border-radius:4px;padding:8px;background:#fafafa;display:grid;gap:8px}
 .slot.empty{background:#fff}
 .slot-title{font-weight:700}
+.portal-add{align-content:start}
+.portal-add button{font-size:20px;line-height:1;padding:8px 12px}
 #message{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px;background:#111;color:#eee;padding:8px;border-radius:4px}
 </style>
 </head>
@@ -49,7 +51,7 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <h2>Portal of Power</h2>
 <div id="slots" class="slots"></div>
 <div class="actions">
-<button onclick="clearActive()">Clear All Slots</button>
+<button onclick="clearActive()">Clear Portal</button>
 </div>
 </section>
 
@@ -77,11 +79,11 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 </section>
 
 <section>
-<h2>Upload</h2>
+<h2>Import</h2>
 <form id="uploadEntityForm">
 <label>Entity Name<input name="name" required placeholder="Imported entity name"></label>
 <label>Entity Binary<input name="file" type="file" required></label>
-<button type="submit">Upload Entity</button>
+<button type="submit">Import Entity</button>
 </form>
 </section>
 
@@ -133,7 +135,7 @@ function renderStatus(status) {
   const capacity = storage.capacity_bytes || 0;
   $("status").innerHTML =
     `<div>Mode: ${status.mode || "unknown"}</div>` +
-    `<div>Occupied slots: ${slots.length}</div>` +
+    `<div>Figures on portal: ${slots.length}</div>` +
     `<div>Records: ${storage.entities || 0} entities</div>` +
     `<div>Storage: ${used} / ${capacity} bytes (${storagePercent(used, capacity)})</div>` +
     `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
@@ -177,7 +179,7 @@ function renderEntities() {
       .filter(slot => slot.entity_id === item.id)
       .map(slot => Number(slot.slot) + 1);
     const active = slots.length ? " (active)" : "";
-    const download = `<a href="/api/entity/${item.id}.bin">Download</a>`;
+    const download = `<a href="/api/entity/${item.id}.bin">Export</a>`;
     const clone = `<button onclick="cloneEntity(${item.id})">Clone</button>`;
     const place_remove = slots.length
       ? slots.map(slot => `<button onclick="removeSlot(${slot - 1})">Remove from Portal</button>`).join("")
@@ -198,28 +200,30 @@ function renderSlots() {
   const entities = library.entities || [];
   const activeSlots = library.active_slots || [];
   const sortedEntities = [...entities].sort((left, right) => left.name.localeCompare(right.name));
-  $("slots").innerHTML = Array.from({length: portalSlotCount}, (_, slot) => {
-    const active = activeSlots.find(item => Number(item.slot) === slot);
-    const entity = active ? entities.find(item => item.id === active.entity_id) : null;
-    if (entity) {
+  const activeCards = [...activeSlots]
+    .sort((left, right) => Number(left.slot) - Number(right.slot))
+    .map(active => {
+      const portalIndex = Number(active.slot);
+      const entity = entities.find(item => item.id === active.entity_id);
+      if (!entity) return "";
       return `<div class="slot">` +
-        `<div class="slot-title">Slot ${slot + 1}</div>` +
-        `<div>#${entity.id} ${escapeHtml(entity.name)}</div>` +
+        `<div class="slot-title">${escapeHtml(entity.name)}</div>` +
         `<div class="meta">${entityMeta(entity)}</div>` +
         `<div class="actions">` +
-        `<button onclick="removeSlot(${slot})">Remove</button>` +
-        `<select id="slotSelect${slot}">${entityOptions(sortedEntities, entity.id)}</select>` +
-        `<button onclick="placeSlotFromSelect(${slot}, 'slotSelect${slot}')">Replace</button>` +
+        `<button onclick="removeSlot(${portalIndex})">Remove</button>` +
         `</div></div>`;
-    }
-    return `<div class="slot empty">` +
-      `<div class="slot-title">Slot ${slot + 1}</div>` +
-      `<div class="meta">Empty</div>` +
+    })
+    .join("");
+  const availableEntities = sortedEntities.filter(item => !activeSlots.some(active => active.entity_id === item.id));
+  const addCard = firstEmptySlot(activeSlots) == null
+    ? `<div class="slot empty"><div class="slot-title">Portal Full</div><div class="meta">Remove a figure before adding another.</div></div>`
+    : `<div class="slot empty portal-add">` +
+      `<div class="slot-title">Add Figure</div>` +
       `<div class="actions">` +
-      `<select id="slotSelect${slot}">${entityOptions(sortedEntities, null)}</select>` +
-      `<button onclick="placeSlotFromSelect(${slot}, 'slotSelect${slot}')" ${sortedEntities.length ? "" : "disabled"}>Place</button>` +
+      `<select id="portalAddSelect">${entityOptions(availableEntities, null)}</select>` +
+      `<button title="Place on Portal" onclick="placePortalAddSelect()" ${availableEntities.length ? "" : "disabled"}>+</button>` +
       `</div></div>`;
-  }).join("");
+  $("slots").innerHTML = (activeCards || "<div class='meta'>Portal is empty.</div>") + addCard;
 }
 
 function entityOptions(entities, selectedId) {
@@ -291,7 +295,7 @@ async function post(path, params = "") {
 async function placeEntityInSlot(id, slot) {
   const index = Number(slot);
   if (!Number.isInteger(index) || index < 0 || index >= portalSlotCount) {
-    say(`slot must be between 1 and ${portalSlotCount}`);
+    say("portal target is invalid");
     return;
   }
   await post("/api/entity/select", `id=${id}&slot=${index}`);
@@ -300,16 +304,16 @@ async function placeEntityInSlot(id, slot) {
 async function placeEntityFirstAvailable(id) {
   const slot = firstEmptySlot(library.active_slots || []);
   if (slot == null) {
-    say("no portal slots are empty");
+    say("the portal is full");
     return;
   }
   await placeEntityInSlot(id, slot);
 }
 
-async function placeSlotFromSelect(slot, selectId) {
-  const id = Number($(selectId).value);
+async function placePortalAddSelect() {
+  const id = Number($("portalAddSelect").value);
   if (!Number.isInteger(id)) return;
-  await placeEntityInSlot(id, slot);
+  await placeEntityFirstAvailable(id);
 }
 
 async function removeSlot(slot) {
