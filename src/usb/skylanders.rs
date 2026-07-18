@@ -33,7 +33,9 @@ pub const FIGURE_BLOCK_BYTES: usize = 16;
 pub const FIGURE_BLOCK_COUNT: u8 = 64;
 pub const FIGURE_IMAGE_BYTES: usize = FIGURE_BLOCK_BYTES * FIGURE_BLOCK_COUNT as usize;
 pub const FIRST_FIGURE_SLOT_ID: u8 = 0x10;
-const STATUS_REPORTS_PER_QUEUED_STATE: u8 = 8;
+// The Wii can miss a one-report placement edge while polling other portal state.
+// Hold transient Added/Removing statuses across several reports before settling.
+pub const PLACEMENT_STATUS_HOLD_REPORTS: u8 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -92,6 +94,7 @@ pub const HID_REPORT_DESCRIPTOR: &[u8] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PortalState {
     pub active: bool,
+    status_updated: bool,
     pub interrupt_counter: u8,
     slots: [PortalSlot; MAX_FIGURES],
 }
@@ -100,7 +103,7 @@ pub struct PortalState {
 struct PortalSlot {
     active_entity_id: Option<u32>,
     slot_status: SlotStatus,
-    queued_status: [Option<SlotStatus>; 4],
+    queued_status: [Option<SlotStatus>; 8],
     queued_status_hold: u8,
     image: [u8; FIGURE_IMAGE_BYTES],
     dirty: bool,
@@ -110,6 +113,7 @@ impl PortalState {
     pub const fn new() -> Self {
         Self {
             active: true,
+            status_updated: false,
             interrupt_counter: 0,
             slots: [PortalSlot::new(); MAX_FIGURES],
         }
@@ -121,7 +125,7 @@ impl PortalSlot {
         Self {
             active_entity_id: None,
             slot_status: SlotStatus::Removed,
-            queued_status: [None; 4],
+            queued_status: [None; 8],
             queued_status_hold: 0,
             image: [0; FIGURE_IMAGE_BYTES],
             dirty: false,
@@ -189,14 +193,14 @@ impl PortalState {
         slot.slot_status = SlotStatus::Added;
         slot.queued_status_hold = 0;
         slot.queued_status = if was_present {
-            [
-                Some(SlotStatus::Removing),
-                Some(SlotStatus::Removed),
-                Some(SlotStatus::Added),
-                Some(SlotStatus::Ready),
-            ]
+            status_queue(&[
+                SlotStatus::Removing,
+                SlotStatus::Removed,
+                SlotStatus::Added,
+                SlotStatus::Ready,
+            ])
         } else {
-            [Some(SlotStatus::Added), Some(SlotStatus::Ready), None, None]
+            status_queue(&[SlotStatus::Added, SlotStatus::Ready])
         };
         slot.dirty = false;
         true
@@ -216,12 +220,7 @@ impl PortalState {
         slot.active_entity_id = None;
         slot.slot_status = SlotStatus::Removing;
         slot.queued_status_hold = 0;
-        slot.queued_status = [
-            Some(SlotStatus::Removing),
-            Some(SlotStatus::Removed),
-            None,
-            None,
-        ];
+        slot.queued_status = status_queue(&[SlotStatus::Removing, SlotStatus::Removed]);
         slot.dirty = false;
     }
 
@@ -229,6 +228,40 @@ impl PortalState {
         for slot in 0..MAX_FIGURES {
             self.clear_slot(slot as u8);
         }
+    }
+
+    pub fn activate(&mut self) {
+        if self.active {
+            return;
+        }
+
+        for slot in &mut self.slots {
+            if slot.slot_status.is_present() {
+                slot.queue_present_cycle();
+            }
+        }
+        self.active = true;
+    }
+
+    pub fn deactivate(&mut self) {
+        for slot in &mut self.slots {
+            slot.collapse_for_deactivate();
+        }
+        self.active = false;
+    }
+
+    pub fn update_status(&mut self) {
+        if self.status_updated {
+            return;
+        }
+
+        for slot in &mut self.slots {
+            if !slot.slot_status.is_present() {
+                continue;
+            }
+            slot.enqueue_statuses(&[SlotStatus::Removing, SlotStatus::Added, SlotStatus::Ready]);
+        }
+        self.status_updated = true;
     }
 
     pub fn next_status_report(&mut self) -> Report {
@@ -275,6 +308,38 @@ impl PortalState {
 }
 
 impl PortalSlot {
+    fn queue_present_cycle(&mut self) {
+        self.queued_status_hold = 0;
+        self.enqueue_statuses(&[SlotStatus::Added, SlotStatus::Ready]);
+    }
+
+    fn enqueue_statuses(&mut self, statuses: &[SlotStatus]) {
+        for status in statuses {
+            if let Some(slot) = self.queued_status.iter_mut().find(|slot| slot.is_none()) {
+                *slot = Some(*status);
+            }
+        }
+    }
+
+    fn collapse_for_deactivate(&mut self) {
+        if self.queued_status.iter().any(Option::is_some) {
+            for index in (0..self.queued_status.len()).rev() {
+                if let Some(status) = self.queued_status[index] {
+                    self.slot_status = status;
+                    break;
+                }
+            }
+            self.queued_status = [None; 8];
+            self.queued_status_hold = 0;
+        }
+
+        self.slot_status = if self.slot_status.is_present() {
+            SlotStatus::Ready
+        } else {
+            SlotStatus::Removed
+        };
+    }
+
     fn next_status(&mut self) -> SlotStatus {
         if self.queued_status_hold > 0 {
             self.queued_status_hold -= 1;
@@ -283,7 +348,7 @@ impl PortalSlot {
 
         if let Some(status) = pop_status(&mut self.queued_status) {
             self.slot_status = status;
-            self.queued_status_hold = STATUS_REPORTS_PER_QUEUED_STATE.saturating_sub(1);
+            self.queued_status_hold = PLACEMENT_STATUS_HOLD_REPORTS.saturating_sub(1);
         }
         self.slot_status
     }
@@ -348,6 +413,15 @@ pub fn audio_firmware_response(major: u8, minor: u8) -> Report {
     report
 }
 
+pub fn color_response(red: u8, green: u8, blue: u8) -> Report {
+    let mut report = [0; REPORT_BYTES];
+    report[0] = b'C';
+    report[1] = red;
+    report[2] = green;
+    report[3] = blue;
+    report
+}
+
 pub fn query_response(slot: u8, block: u8, data: &[u8; FIGURE_BLOCK_BYTES]) -> Report {
     let mut report = [0; REPORT_BYTES];
     report[0] = b'Q';
@@ -381,16 +455,23 @@ pub fn handle_command(state: &mut PortalState, command: &[u8]) -> Option<Command
     let op = *command.first()?;
     match op {
         b'A' => {
-            state.active = command.get(1).copied().unwrap_or(0) != 0;
+            if command.get(1).copied().unwrap_or(0) != 0 {
+                state.activate();
+            } else {
+                state.deactivate();
+            }
             Some(CommandResponse {
                 report: activate_response(state.active),
                 queue_report: true,
             })
         }
-        b'R' => Some(CommandResponse {
-            report: ready_response(),
-            queue_report: true,
-        }),
+        b'R' => {
+            state.update_status();
+            Some(CommandResponse {
+                report: ready_response(),
+                queue_report: true,
+            })
+        }
         b'S' => Some(CommandResponse {
             report: state.next_status_report(),
             queue_report: false,
@@ -423,7 +504,15 @@ pub fn handle_command(state: &mut PortalState, command: &[u8]) -> Option<Command
             report: ack_response(op),
             queue_report: true,
         }),
-        b'C' | b'L' | b'V' | b'Z' => Some(CommandResponse {
+        b'C' => Some(CommandResponse {
+            report: color_response(
+                command.get(1).copied().unwrap_or(0),
+                command.get(2).copied().unwrap_or(0),
+                command.get(3).copied().unwrap_or(0),
+            ),
+            queue_report: false,
+        }),
+        b'L' | b'V' | b'Z' => Some(CommandResponse {
             report: ack_response(op),
             queue_report: false,
         }),
@@ -440,7 +529,15 @@ fn command_slot(slot_id: u8) -> Option<u8> {
     }
 }
 
-fn pop_status(queue: &mut [Option<SlotStatus>; 4]) -> Option<SlotStatus> {
+fn status_queue(statuses: &[SlotStatus]) -> [Option<SlotStatus>; 8] {
+    let mut queue = [None; 8];
+    for (index, status) in statuses.iter().take(queue.len()).enumerate() {
+        queue[index] = Some(*status);
+    }
+    queue
+}
+
+fn pop_status(queue: &mut [Option<SlotStatus>; 8]) -> Option<SlotStatus> {
     let status = queue[0]?;
     for index in 1..queue.len() {
         queue[index - 1] = queue[index];
@@ -488,6 +585,10 @@ mod tests {
         assert_eq!(&activate_response(true)[..4], &[b'A', 0x01, 0xff, 0x77]);
         assert_eq!(&ready_response()[..3], &[b'R', 0x02, 0x1b]);
         assert_eq!(
+            &color_response(0x12, 0x34, 0x56)[..4],
+            &[b'C', 0x12, 0x34, 0x56]
+        );
+        assert_eq!(
             &audio_firmware_response(0x01, 0x19)[..4],
             &[b'M', 0x01, 0x00, 0x19]
         );
@@ -526,7 +627,7 @@ mod tests {
         assert_eq!(first[0], b'S');
         assert_eq!(&first[1..5], &0x03u32.to_le_bytes());
         assert_eq!(first[5], 0);
-        for _ in 1..STATUS_REPORTS_PER_QUEUED_STATE {
+        for _ in 1..PLACEMENT_STATUS_HOLD_REPORTS {
             assert_eq!(
                 handle_command(&mut state, &[b'S']).unwrap().report[1],
                 SlotStatus::Added as u8
@@ -537,12 +638,52 @@ mod tests {
     }
 
     #[test]
+    fn loading_entity_holds_added_status_before_ready() {
+        let mut state = PortalState::new();
+        assert!(state.load_entity(42, &[0; FIGURE_IMAGE_BYTES]));
+
+        for _ in 0..PLACEMENT_STATUS_HOLD_REPORTS {
+            assert_eq!(state.next_status_report()[1], SlotStatus::Added as u8);
+        }
+        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+    }
+
+    #[test]
+    fn activate_reannounces_already_present_entities_only_after_deactivate() {
+        let mut state = PortalState::new();
+        assert!(state.load_entity(42, &[0; FIGURE_IMAGE_BYTES]));
+        advance_slot_status(&mut state, SlotStatus::Ready);
+
+        let response = handle_command(&mut state, &[b'A', 1]).unwrap();
+
+        assert_eq!(&response.report[..4], &[b'A', 0x01, 0xff, 0x77]);
+        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+
+        let response = handle_command(&mut state, &[b'A', 0]).unwrap();
+        assert_eq!(&response.report[..4], &[b'A', 0x00, 0xff, 0x77]);
+
+        let response = handle_command(&mut state, &[b'A', 1]).unwrap();
+        assert_eq!(&response.report[..4], &[b'A', 0x01, 0xff, 0x77]);
+        for _ in 0..PLACEMENT_STATUS_HOLD_REPORTS {
+            assert_eq!(state.next_status_report()[1], SlotStatus::Added as u8);
+        }
+        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+    }
+
+    #[test]
     fn command_handler_accepts_convenience_commands() {
         let mut state = PortalState::new();
 
         assert_eq!(
             &handle_command(&mut state, &[b'M']).unwrap().report[..4],
             &[b'M', 0x00, 0x00, 0x19]
+        );
+        assert_eq!(
+            &handle_command(&mut state, &[b'C', 0xff, 0xee, 0xdd])
+                .unwrap()
+                .report[..4],
+            &[b'C', 0xff, 0xee, 0xdd]
         );
         assert!(!handle_command(&mut state, &[b'C']).unwrap().queue_report);
         assert!(!handle_command(&mut state, &[b'V']).unwrap().queue_report);
@@ -645,7 +786,7 @@ mod tests {
     }
 
     fn advance_numbered_slot_status(state: &mut PortalState, slot: u8, expected: SlotStatus) {
-        for _ in 0..=STATUS_REPORTS_PER_QUEUED_STATE {
+        for _ in 0..=PLACEMENT_STATUS_HOLD_REPORTS {
             if status_for_slot(&state.next_status_report(), slot) == expected {
                 return;
             }
