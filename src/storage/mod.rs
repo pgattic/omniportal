@@ -2,7 +2,7 @@ use core::cell::RefCell;
 
 use crate::config;
 use crate::domain::{FigureKind, GameLine, ImageFormat};
-use crate::figures::formats::SKYLANDERS_IMAGE_BYTES;
+use crate::figures::formats::{INFINITY_IMAGE_BYTES, SKYLANDERS_IMAGE_BYTES};
 use crate::figures::infinity::infinity_catalog_entry;
 use crate::figures::skylanders::catalog::{
     skylanders_catalog_entry, FigureCatalogEntry as SkylandersCatalogEntry, SKYLANDERS_CATALOG,
@@ -423,6 +423,12 @@ pub fn upload_entity_from_params(params: &str, image: &[u8]) -> Result<String, S
     }
 }
 
+pub fn upload_entity_from_form_params(params: &str) -> Result<String, StorageError> {
+    let image_hex = query_param(params, "image_hex").ok_or(StorageError::BadRequest)?;
+    let image = decode_hex_bytes(&image_hex).ok_or(StorageError::BadRequest)?;
+    upload_entity_from_params(params, &image)
+}
+
 fn upload_skylanders_entity_from_params(
     params: &str,
     image: &[u8],
@@ -485,9 +491,7 @@ fn upload_skylanders_entity_from_params(
 
 fn upload_infinity_entity_from_params(params: &str, image: &[u8]) -> Result<String, StorageError> {
     let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
-    if image.is_empty() {
-        return Err(StorageError::BadRequest);
-    }
+    let imported = ImportedInfinityImage::parse(image).ok_or(StorageError::BadRequest)?;
     let identity_id =
         query_param(params, "identity_id").and_then(|value| parse_u32(value.as_str()));
 
@@ -506,7 +510,9 @@ fn upload_infinity_entity_from_params(params: &str, image: &[u8]) -> Result<Stri
                 .map(|item| item.kind)
                 .unwrap_or(FigureKind::Unknown),
             data_mode: EntityDataMode::MutableImage,
-            character_id: identity.map(|item| item.character_id).unwrap_or(0),
+            character_id: identity
+                .map(|item| item.character_id)
+                .unwrap_or(imported.figure_number),
             variant_id: None,
             blob_id: Some(blob_id),
             image_format: ImageFormat::InfinityUnknown,
@@ -517,12 +523,14 @@ fn upload_infinity_entity_from_params(params: &str, image: &[u8]) -> Result<Stri
         };
         append_entity_record(store, entity)?;
         Ok(format!(
-            "{{\"uploaded\":\"entity\",\"id\":{},\"blob_id\":{},\"name\":\"{}\",\"game\":\"{}\",\"format\":\"{}\"}}\n",
+            "{{\"uploaded\":\"entity\",\"id\":{},\"blob_id\":{},\"name\":\"{}\",\"game\":\"{}\",\"format\":\"{}\",\"image_len\":{},\"tag_id\":\"{}\"}}\n",
             entity_id.0,
             blob_id.0,
             json_escape(entity.name.as_str()),
             entity.game_line.wire_name(),
-            entity.image_format.wire_name()
+            entity.image_format.wire_name(),
+            entity.image_len,
+            hex_bytes(&imported.tag_id)
         ))
     })
 }
@@ -951,6 +959,25 @@ impl ImportedSkylandersImage {
             character_id,
             variant_id,
             catalog_entry,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ImportedInfinityImage {
+    tag_id: [u8; 7],
+    figure_number: u32,
+}
+
+impl ImportedInfinityImage {
+    fn parse(image: &[u8]) -> Option<Self> {
+        if image.len() != INFINITY_IMAGE_BYTES {
+            return None;
+        }
+        let tag_id = image.get(..7)?.try_into().ok()?;
+        Some(Self {
+            tag_id,
+            figure_number: 0,
         })
     }
 }
@@ -1829,6 +1856,20 @@ fn percent_decode(value: &str) -> String {
     out
 }
 
+fn decode_hex_bytes(value: &str) -> Option<Vec<u8>> {
+    let bytes = value.as_bytes();
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::new();
+    for pair in bytes.chunks_exact(2) {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        out.push(high << 4 | low);
+    }
+    Some(out)
+}
+
 fn hex_nibble(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
@@ -1881,6 +1922,16 @@ fn option_str_json(value: Option<&str>) -> String {
     value
         .map(|value| format!("\"{}\"", json_escape(value)))
         .unwrap_or_else(|| String::from("null"))
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::new();
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -2075,6 +2126,42 @@ mod tests {
         let mut bad = image;
         bad[4] ^= 0x01;
         assert_eq!(ImportedSkylandersImage::parse(&bad), None);
+    }
+
+    #[test]
+    fn imported_infinity_images_require_raw_figure_size_and_expose_tag_id() {
+        let mut image = [0u8; INFINITY_IMAGE_BYTES];
+        image[..7].copy_from_slice(&[0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6]);
+
+        let imported = ImportedInfinityImage::parse(&image).unwrap();
+        assert_eq!(imported.tag_id, [0x04, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6]);
+        assert_eq!(imported.figure_number, 0);
+        assert_eq!(hex_bytes(&imported.tag_id), String::from("04a1b2c3d4e5f6"));
+
+        assert_eq!(ImportedInfinityImage::parse(&image[..319]), None);
+        let mut oversized = Vec::new();
+        oversized.resize(INFINITY_IMAGE_BYTES + 1, 0);
+        assert_eq!(ImportedInfinityImage::parse(&oversized), None);
+    }
+
+    #[test]
+    fn decodes_form_hex_image_payload() {
+        let mut image = [0u8; INFINITY_IMAGE_BYTES];
+        image[..7].copy_from_slice(&[0x04, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        let params = format!(
+            "game=infinity&name=Mr+Incredible&image_hex={}",
+            hex_bytes(&image)
+        );
+        let image_hex = query_param(&params, "image_hex").unwrap();
+        let decoded = decode_hex_bytes(&image_hex).unwrap();
+
+        assert_eq!(decoded, image);
+        assert_eq!(
+            ImportedInfinityImage::parse(&decoded).unwrap().tag_id,
+            image[..7]
+        );
+        assert_eq!(decode_hex_bytes("abc"), None);
+        assert_eq!(decode_hex_bytes("zz"), None);
     }
 
     #[test]

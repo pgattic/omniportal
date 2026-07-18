@@ -47,6 +47,53 @@ def poll_response(ep_out, ep_in) -> bytes:
     return read_report(ep_in)
 
 
+def poll_until_response(ep_out, ep_in, expected_prefix: bytes) -> bytes:
+    last = b""
+    for _ in range(8):
+        response = poll_response(ep_out, ep_in)
+        if response.startswith(expected_prefix):
+            return response
+        if response.startswith(b"\xAB"):
+            print(f"Change report: {response[:7].hex(' ')}")
+        last = response
+    raise RuntimeError(
+        f"Did not receive {expected_prefix.hex(' ')} response; last was {last.hex(' ')}"
+    )
+
+
+def command_response(
+    ep_out, ep_in, command: int, sequence: int, payload: bytes = b""
+) -> bytes:
+    request = command_packet(command, sequence, payload)
+    write_report(ep_out, request)
+    echo = read_report(ep_in)
+    if echo != request:
+        raise RuntimeError(
+            f"Unexpected command echo for 0x{command:02x}: {echo.hex(' ')}"
+        )
+    return poll_until_response(ep_out, ep_in, bytes([0xAA]))
+
+
+def verify_response_checksum(label: str, report: bytes) -> None:
+    length = report[1]
+    checksum_index = 2 + length
+    if checksum_index >= len(report):
+        raise RuntimeError(f"{label} checksum index out of range: {report.hex(' ')}")
+    actual = report[checksum_index]
+    expected = checksum(report[:checksum_index])
+    if actual != expected:
+        raise RuntimeError(
+            f"{label} checksum mismatch: got 0x{actual:02x}, expected 0x{expected:02x}"
+        )
+
+
+def first_present_order(presence: bytes):
+    if presence[1] < 3:
+        return None
+    position_order = presence[3]
+    return position_order & 0x0F
+
+
 def main() -> int:
     dev = usb.core.find(idVendor=VID, idProduct=PID)
     if dev is None:
@@ -76,7 +123,7 @@ def main() -> int:
             print(f"Unexpected activate echo: {echo.hex(' ')}", file=sys.stderr)
             return 1
 
-        activate_response = poll_response(ep_out, ep_in)
+        activate_response = poll_until_response(ep_out, ep_in, bytes([0xAA, 0x15]))
         if not activate_response.startswith(bytes.fromhex("aa 15 00 00 0f 01")):
             print(
                 f"Unexpected activate response: {activate_response.hex(' ')}",
@@ -84,26 +131,29 @@ def main() -> int:
             )
             return 1
 
-        presence = command_packet(0xA1, 0x02)
-        write_report(ep_out, presence)
-        echo = read_report(ep_in)
-        if echo != presence:
-            print(f"Unexpected presence echo: {echo.hex(' ')}", file=sys.stderr)
-            return 1
-
-        presence_response = poll_response(ep_out, ep_in)
+        presence_response = command_response(ep_out, ep_in, 0xA1, 0x02)
         if presence_response[:4] != bytes([0xAA, 0x01, 0x02, 0xAD]):
-            print(
-                f"Unexpected empty presence response: {presence_response.hex(' ')}",
-                file=sys.stderr,
-            )
-            return 1
+            verify_response_checksum("presence response", presence_response)
 
         print("Disney Infinity USB base probe OK")
         print(f"Activate response: {activate_response[:24].hex(' ')}")
-        print(f"Empty presence: {presence_response[:4].hex(' ')}")
+        print(f"Presence response: {presence_response[:12].hex(' ')}")
+
+        order_added = first_present_order(presence_response)
+        if order_added is not None:
+            tag_response = command_response(
+                ep_out, ep_in, 0xB4, 0x03, bytes([order_added])
+            )
+            verify_response_checksum("tag response", tag_response)
+            block_response = command_response(
+                ep_out, ep_in, 0xA2, 0x04, bytes([order_added, 0x00, 0x00])
+            )
+            verify_response_checksum("block response", block_response)
+            print(f"First figure order: {order_added}")
+            print(f"Tag ID: {tag_response[4:11].hex(' ')}")
+            print(f"Block 1: {block_response[4:20].hex(' ')}")
         return 0
-    except usb.core.USBError as error:
+    except (RuntimeError, usb.core.USBError) as error:
         print(f"USB probe failed: {error}", file=sys.stderr)
         return 1
     finally:

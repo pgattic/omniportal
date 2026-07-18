@@ -260,6 +260,13 @@ function storagePercent(used, capacity) {
   return `${((used / capacity) * 100).toFixed(1)}%`;
 }
 
+async function fileHex(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let out = "";
+  for (const byte of bytes) out += byte.toString(16).padStart(2, "0");
+  return out;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -289,9 +296,19 @@ $("uploadEntityForm").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.target;
   const file = form.elements.file.files[0];
-  const query = `game=${enc(form.elements.game.value)}&name=${enc(form.elements.name.value)}`;
+  if (!file) {
+    say("Choose a binary file to import.");
+    return;
+  }
+  if (form.elements.game.value === "infinity" && file.size !== 320) {
+    say(`Disney Infinity imports must be exactly 320 bytes; selected file is ${file.size} bytes.`);
+    return;
+  }
   try {
-    say(await api(`/api/entity/upload?${query}`, {method:"POST", body: await file.arrayBuffer()}));
+    say(`Uploading ${file.name} (${file.size} bytes)...`);
+    const imageHex = await fileHex(file);
+    const body = `game=${enc(form.elements.game.value)}&name=${enc(form.elements.name.value)}&image_hex=${imageHex}`;
+    say(await api("/api/entity/upload", {method:"POST", body}));
     form.reset();
     await refreshAll();
   } catch (error) { say(error.message); }

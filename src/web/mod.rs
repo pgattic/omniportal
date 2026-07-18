@@ -101,11 +101,17 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
         )
         .await;
     } else if method == "POST" && path == "/api/entity/upload" {
-        write_storage_result(
-            socket,
-            crate::storage::upload_entity_from_params(query, body),
-        )
-        .await;
+        println!(
+            "HTTP entity upload: query='{}', bytes={}",
+            query,
+            body.len()
+        );
+        let result = if query.is_empty() {
+            crate::storage::upload_entity_from_form_params(params(query, body).as_str())
+        } else {
+            crate::storage::upload_entity_from_params(query, body)
+        };
+        write_storage_result(socket, result).await;
     } else if method == "POST" && path == "/api/entity/clone" {
         write_storage_result(
             socket,
@@ -379,6 +385,7 @@ fn hex_nibble(byte: u8) -> Option<u8> {
 #[cfg(target_arch = "xtensa")]
 async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<usize, ()> {
     let mut read = socket.read(buffer).await.map_err(|_| ())?;
+    let mut sent_continue = false;
     loop {
         if let Some(body_start) = body_start(&buffer[..read]) {
             let content_len = content_length(&buffer[..body_start]).unwrap_or(0);
@@ -388,6 +395,10 @@ async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<u
             }
             if needed > buffer.len() {
                 return Err(());
+            }
+            if !sent_continue && expects_continue(&buffer[..body_start]) {
+                write_all(socket, b"HTTP/1.1 100 Continue\r\n\r\n").await;
+                sent_continue = true;
             }
             let chunk = socket
                 .read(&mut buffer[read..needed])
@@ -408,6 +419,23 @@ async fn read_request(socket: &mut TcpSocket<'_>, buffer: &mut [u8]) -> Result<u
             read += chunk;
         }
     }
+}
+
+pub fn expects_continue(request_headers: &[u8]) -> bool {
+    let Ok(header) = core::str::from_utf8(request_headers) else {
+        return false;
+    };
+    let header = header.split("\r\n\r\n").next().unwrap_or(header);
+    for line in header.lines() {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("expect")
+                && value.trim().eq_ignore_ascii_case("100-continue")
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn split_target(target: &str) -> (&str, &str) {
@@ -523,6 +551,17 @@ mod tests {
         let request = b"POST /api/identity/create HTTP/1.1\r\nhost: portal\r\ncontent-length: 35\r\n\r\nignored";
 
         assert_eq!(content_length(request), Some(35));
+    }
+
+    #[test]
+    fn detects_expect_continue_case_insensitively() {
+        let request =
+            b"POST /api/entity/upload HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 320\r\n\r\n";
+
+        assert!(expects_continue(request));
+        assert!(!expects_continue(
+            b"POST /api/entity/upload HTTP/1.1\r\nContent-Length: 320\r\n\r\n"
+        ));
     }
 
     #[test]
