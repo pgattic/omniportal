@@ -186,6 +186,8 @@ async function switchMode() {
   } else {
     say(`${result.mode} mode is already active.`);
   }
+  $("catalogGame").value = result.mode;
+  $("uploadEntityForm").elements.game.value = result.mode;
   await refreshAll();
 }
 

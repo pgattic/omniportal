@@ -193,14 +193,16 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
             return;
         }
 
-        let report = self.state.next_status_report();
-        match self.ep_in.write(&report) {
-            Ok(_) | Err(UsbError::WouldBlock) => {}
-            Err(error) => {
-                println!(
-                    "Skylanders USB interrupt IN status write error: {:?}",
-                    error
-                );
+        if self.state.has_present_entities() {
+            let report = self.state.next_status_report();
+            match self.ep_in.write(&report) {
+                Ok(_) | Err(UsbError::WouldBlock) => {}
+                Err(error) => {
+                    println!(
+                        "Skylanders USB interrupt IN present-status write error: {:?}",
+                        error
+                    );
+                }
             }
         }
     }
@@ -238,11 +240,13 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         self.flush_dirty_entity(true);
         match storage::active_slot_images() {
             Ok(images) => {
+                let mut placement_changed = false;
                 for slot in 0..skylanders::MAX_FIGURES {
                     if active_marker.0[slot].is_none()
                         && self.state.slot_entity_id(slot as u8).is_some()
                     {
                         self.state.clear_slot(slot as u8);
+                        placement_changed = true;
                     }
                 }
 
@@ -253,6 +257,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                     }
                     if self.state.load_entity_into_slot(slot, id.0, &image) {
                         loaded += 1;
+                        placement_changed = true;
                     } else {
                         println!(
                             "Skylanders USB rejected slot {} entity {} image length {}",
@@ -265,6 +270,9 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                 }
 
                 self.active_selection_marker = active_marker;
+                if placement_changed {
+                    self.queue_status_reports(REPORT_QUEUE_LEN);
+                }
                 if loaded > 0 {
                     println!("Skylanders USB loaded {} active portal slot(s)", loaded);
                 }
@@ -278,6 +286,13 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                 self.state.clear_all_entities();
                 self.active_selection_marker = ([None; skylanders::MAX_FIGURES], 0);
             }
+        }
+    }
+
+    fn queue_status_reports(&mut self, count: usize) {
+        for _ in 0..count {
+            let report = self.state.next_status_report();
+            self.push_report(report);
         }
     }
 
@@ -775,7 +790,9 @@ impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
         if req.request_type == RequestType::Class && req.recipient == Recipient::Interface {
             match req.request {
                 skylanders::HID_GET_REPORT_REQUEST => {
-                    let report = self.state.next_status_report();
+                    let report = self
+                        .pop_report()
+                        .unwrap_or_else(|| self.state.next_status_report());
                     let _ = xfer.accept_with(&report);
                 }
                 skylanders::HID_GET_IDLE_REQUEST => {
