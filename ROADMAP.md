@@ -287,9 +287,9 @@ Before committing to the USB crate, prove it can handle the Skylanders control-t
 
 ---
 
-## 8. Later Pico 2 W Support
+## 8. Pico 2 W Support
 
-Supporting Raspberry Pi Pico 2 W later is feasible, but it should be treated as a second hardware backend, not a trivial recompile.
+Supporting Raspberry Pi Pico 2 W is feasible, but it should be treated as a second hardware backend, not a trivial recompile.
 
 Likely reusable with modest changes:
 - Figure library data model, fresh-image generation, and import/export validation.
@@ -304,8 +304,16 @@ Likely platform-specific:
 - Flash layout, persistence, boot/flashing flow, logging, and linker configuration.
 - Timing and task scheduling details around USB polling/interrupts.
 
-Expected work estimate after the ESP32-S3 version works:
-- Minimal compile-and-boot Pico 2 W port: several focused sessions.
+Current Pico 2 W status:
+- [x] Add an RP2350/Pico 2 W target path that builds from the shared crate.
+- [x] Produce a UF2 artifact for drag-and-drop flashing.
+- [x] Bring up a USB-only Skylanders Portal of Power probe target.
+- [ ] Test the Pico 2 W image with `scripts/probe-skylanders-portal.py`.
+- [ ] Add Pico 2 W flash storage.
+- [ ] Add Pico 2 W CYW43 AP + DHCP + web UI.
+- [ ] Add Pico 2 W Disney Infinity USB mode.
+
+Expected remaining work:
 - AP + web UI parity: moderate work, mainly CYW43 AP mode and networking integration.
 - USB parity: moderate to high work, depending on how cleanly the USB/device protocol code was separated.
 - End-to-end Wii validation: still required; protocol logic reuse does not eliminate host-specific USB quirks.

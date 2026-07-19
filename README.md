@@ -36,13 +36,38 @@ Flash and monitor:
 scripts/flash-firmware.sh /dev/ttyACM0
 ```
 
+## Pico 2 W Bring-Up
+
+Build the current Raspberry Pi Pico 2 W test image:
+
+```sh
+omniportal-pico2w-build
+```
+
+The Pico build currently uses rustup's stable toolchain for the standard
+`thumbv8m.main-none-eabihf` target. It produces
+`target/thumbv8m.main-none-eabihf/release/omniportal-pico2w.uf2`.
+The build script uses `picotool uf2 convert` for RP2350 ARM-S output and adds
+the RP2350-E10 absolute block expected by Pico 2 W bootroms. `elf2uf2-rs` is
+only kept as a fallback because it emits RP2040-family UF2 blocks by default.
+Hold BOOTSEL while plugging in the Pico 2 W, copy the UF2 to the mounted
+`RPI-RP2` drive, then run:
+
+```sh
+sudo python scripts/probe-skylanders-portal.py
+```
+
+The Pico 2 W image currently brings up the USB Skylanders Portal of Power
+personality only. Wi-Fi, storage-backed collection state, and Disney Infinity
+mode still need platform backend work.
+
 ## Code Structure
 
 The project is still one package, but the shared library surface is separated
-from ESP32-S3 firmware wiring:
+from board firmware wiring:
 
 * `lib.rs` - portable library entry point; host builds expose shared logic
-* `main.rs` - thin ESP32-S3 firmware entry point
+* `main.rs` - thin board-specific firmware entry point
 * `figures/` - figure identity and image helpers
 * `storage/` - flash-backed catalog, records, and host-testable journal logic
 * `usb/` - Skylanders and Disney Infinity USB descriptors and protocol helpers
@@ -50,9 +75,11 @@ from ESP32-S3 firmware wiring:
 * `dhcp.rs` - ESP32-S3 DHCPv4 server for AP clients
 * `platform/esp32s3_n16r8/` - ESP32-S3 board entrypoint, WiFi, logging,
   flash adapter, heap setup, and board constants
+* `platform/rp2350_pico2w/` - initial Pico 2 W board entrypoint and USB-only
+  Skylanders probe target
 * `config.rs` - temporary facade over platform board constants
 
-Firmware-only modules are compiled for the Xtensa target. Host builds compile
+Firmware-only modules are compiled for their board targets. Host builds compile
 the portable library logic for tests and future tooling.
 
 USB mode is selected at boot from the persisted device config. Changing mode in

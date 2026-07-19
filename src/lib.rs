@@ -1,4 +1,4 @@
-#![cfg_attr(target_arch = "xtensa", no_std)]
+#![cfg_attr(any(target_arch = "xtensa", target_arch = "arm"), no_std)]
 
 extern crate alloc;
 
@@ -11,5 +11,5 @@ pub mod web;
 
 #[cfg(target_arch = "xtensa")]
 pub mod dhcp;
-#[cfg(target_arch = "xtensa")]
+#[cfg(any(target_arch = "xtensa", target_arch = "arm"))]
 pub mod platform;

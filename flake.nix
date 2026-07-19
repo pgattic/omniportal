@@ -29,6 +29,16 @@
               exec "${pkgs.cargo}/bin/cargo" test --target "${pkgs.stdenv.hostPlatform.config}" --lib "$@"
             '';
           };
+          omniportal-pico2w-build = pkgs.writeShellApplication {
+            name = "omniportal-pico2w-build";
+            runtimeInputs = [
+              pkgs.picotool
+              pkgs.rustup
+            ];
+            text = ''
+              exec scripts/build-pico2w-firmware.sh "$@"
+            '';
+          };
         in
       {
         devShells.default = pkgs.mkShell {
@@ -39,12 +49,15 @@
             pkgs.zlib
           ];
 
-          packages = with pkgs; [
+            packages = with pkgs; [
+            elf2uf2-rs
             espflash
             espup
             ldproxy
+            picotool
             file
             omniportal-host-test
+            omniportal-pico2w-build
             libusb1
             patchelf
             pkg-config
@@ -72,6 +85,7 @@
             echo "  first setup: espup install --targets esp32s3 --export-file $PWD/export-esp.sh"
             echo "  on NixOS:     scripts/patch-esp-toolchain-nixos.sh"
             echo "  build:       cargo build"
+            echo "  build Pico:  omniportal-pico2w-build"
             echo "  host tests:  omniportal-host-test"
             echo "  flash:       espflash flash --partition-table partitions/esp32s3-n16r8.csv --monitor target/xtensa-esp32s3-none-elf/debug/omniportal"
           '';
