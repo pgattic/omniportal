@@ -20,6 +20,7 @@ use crate::{
 
 const REPORT_QUEUE_LEN: usize = 32;
 const STORAGE_POLL_TICKS: u8 = 50;
+const MODE_CHANGE_REBOOT_DELAY: Duration = Duration::from_millis(1_000);
 const STORAGE_WRITE_DEBOUNCE: Duration =
     Duration::from_millis(crate::storage::wear::DEFAULT_COMMIT_DEBOUNCE_MS as u64);
 
@@ -50,9 +51,18 @@ pub(super) async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GP
         .unwrap()
         .build();
 
+    super::esp32s3::force_host_reenumeration(&mut usb_dev, "Skylanders");
+
     loop {
         class.poll_active_entity();
         class.flush_dirty_entity(false);
+
+        if crate::usb::reboot_after_usb_flush_requested() {
+            println!("Skylanders USB flushing active writes before mode re-enumeration");
+            class.flush_dirty_entity(true);
+            Timer::after(MODE_CHANGE_REBOOT_DELAY).await;
+            esp_hal::system::software_reset();
+        }
 
         if usb_dev.poll(&mut [&mut class]) {
             class.poll_usb();

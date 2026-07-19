@@ -73,11 +73,12 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
     } else if method == "GET" && path == "/api/catalog" {
         write_catalog(socket, query).await;
     } else if method == "POST" && path == "/api/mode/set" {
-        write_storage_result(
-            socket,
-            crate::storage::set_usb_mode_from_params(http::params(query, body).as_str()),
-        )
-        .await;
+        let before_mode = crate::storage::usb_mode();
+        let result = crate::storage::set_usb_mode_from_params(http::params(query, body).as_str());
+        if result.is_ok() && crate::storage::usb_mode() != before_mode {
+            crate::usb::request_reboot_after_usb_flush();
+        }
+        write_storage_result(socket, result).await;
     } else if method == "POST" && path == "/api/identity/create" {
         write_storage_result(
             socket,

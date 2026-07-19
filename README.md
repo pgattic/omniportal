@@ -170,6 +170,11 @@ The firmware enumerates as either a Skylanders Portal of Power-compatible HID
 device or a Disney Infinity Base-compatible HID device on the native USB
 connector, depending on the saved USB mode at boot.
 
+On Wii, the reliable flow is to select the desired mode, reset or power-cycle
+the ESP32-S3, then launch the game. Disney Infinity has been observed to leave a
+hot-plugged base suspended when the game is already waiting for a base, so
+restart the game if it does not notice the device after a mode switch or replug.
+
 Skylanders mode:
 
 * VID/PID: `1430:0150`

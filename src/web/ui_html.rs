@@ -181,8 +181,8 @@ function renderDeviceLabels() {
 async function switchMode() {
   const mode = $("modeSelect").value;
   const result = await api("/api/mode/set", {method:"POST", body:`mode=${enc(mode)}`});
-  if (result.reboot_required) {
-    say(`${result.mode} mode saved. Reset or reconnect the ESP32 for USB mode to change.`);
+  if (result.reenumerating) {
+    say(`${result.mode} mode saved. Reset the console game if it does not notice the device.`);
   } else {
     say(`${result.mode} mode is already active.`);
   }

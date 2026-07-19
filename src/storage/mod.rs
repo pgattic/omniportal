@@ -215,7 +215,7 @@ pub fn set_usb_mode_from_params(params: &str) -> Result<String, StorageError> {
         }
 
         Ok(format!(
-            "{{\"mode\":\"{}\",\"changed\":{},\"reboot_required\":{}}}\n",
+            "{{\"mode\":\"{}\",\"changed\":{},\"reboot_required\":false,\"reenumerating\":{}}}\n",
             store.catalog.usb_mode.wire_name(),
             if changed { "true" } else { "false" },
             if changed { "true" } else { "false" }

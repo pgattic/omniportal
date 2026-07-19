@@ -211,13 +211,23 @@ Definition of done: an Infinity game on the Wii sees the selected named entity a
 ### Phase G — Mode Toggle (Skylanders ⇄ Infinity)
 
 - [x] Build a single firmware image containing both Skylanders and Disney Infinity USB implementations, selecting the active descriptor/protocol from persisted device config at boot.
-- [ ] Before toggling modes, flush any dirty active-entity data to flash.
-- [ ] Implement a soft USB disconnect/reconnect: on mode toggle from the Web UI, disconnect the USB device, swap which descriptor set + command handler is active, then reconnect so the Wii re-enumerates the device type.
-- [ ] Add a toggle control to the web UI, wired to this logic.
-- [ ] Test toggling with the Wii already running the relevant game vs. toggling before launching the game — document which works reliably.
-- [ ] Add a "please unplug and replug if the console doesn't notice" fallback note in the UI, since soft re-enumeration is not guaranteed on every host.
+- [x] Before toggling modes, flush any dirty active-entity data to flash.
+- [x] Force USB host re-enumeration during firmware startup so reflashing/resetting is seen as a fresh device attach.
+- [x] Add a toggle control to the web UI, wired to persist the selected mode and automatically reboot/re-enumerate the firmware.
+- [x] Test toggling with the Wii already running the relevant game vs. toggling before launching the game — document which works reliably.
+  - Disney Infinity on Wii works when the ESP32-S3 is already in Infinity mode before launching the game. Hot-plugging into an already-running game leaves the USB device suspended and does not reach `Configured`; track that separately as optional hot-plug work.
+- [x] Add a "please restart the game if the console doesn't notice" fallback note in the UI, since soft re-enumeration is not guaranteed on every host.
 
-Definition of done: you can flip a switch in the web UI and have the Wii recognize the device as the other portal type without a firmware reflash, or you have documented the required unplug/replug fallback.
+Definition of done: you can flip a switch in the web UI, let the ESP32-S3 reboot into the selected USB mode, then launch the matching Wii game without a firmware reflash or manual ESP32-S3 power cycle.
+
+### Optional Milestone — Wii Hot-Plugging
+
+- [ ] Determine whether Skylanders and Disney Infinity games rescan for newly attached bases after the relevant game is already running.
+- [ ] Capture or compare attach/enumeration behavior from a real base, Dolphin, or a USB analyzer when possible.
+- [ ] Investigate whether the ESP32-S3 USB stack can perform a host-visible detach/attach sequence that the Wii accepts during a running game session.
+- [ ] If feasible, implement true in-process soft USB disconnect/reconnect on mode toggle without a firmware software reset.
+
+Definition of done: with a game already running on Wii, attaching or mode-switching OmniPortal causes the game to recognize the correct portal/base without restarting the game. If that is not achievable, document the limitation and keep restart-before-play as the supported flow.
 
 ### Phase H — Import/Export Compatibility
 
@@ -270,7 +280,7 @@ Before committing to the USB crate, prove it can handle the Skylanders control-t
 - Persistent save correctness: mutable entities should be treated as binary images. Console writes need bounds checks, checksums/validation where applicable, and durable commits.
 - Flash wear: avoid writing flash for every USB write command. Coalesce writes and use a journal or wear-leveled storage strategy.
 - Starting data: full known-good dumps are not required for fresh characters, but valid initializer logic is required. All-zero images are not accepted; generated images must include the correct identity/config/key/checksum/encryption blocks for the game line.
-- Soft re-enumeration reliability (Phase G) is not guaranteed — treat it as a spike/experiment early.
+- Wii hot-plug and soft re-enumeration reliability is not guaranteed; keep it as an optional milestone unless evidence shows the target games rescan USB devices during active sessions.
 - Infinity protocol documentation is thinner than Skylanders' — budget extra time/uncertainty for Phase F.
 - Flash budget: generated figure images and imported dumps are small, and 16MB flash is comfortable for a practical collection, but every named mutable entity consumes its own copy unless deduplication or copy-on-write is added later.
 - PSRAM is useful headroom for networking buffers and web responses, but the core design should not require large dynamic allocations.

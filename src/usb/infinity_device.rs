@@ -23,6 +23,7 @@ const REPORT_QUEUE_LEN: usize = 32;
 const STORAGE_POLL_TICKS: u8 = 50;
 const INFINITY_CHANGE_REPORT_REPEATS: usize = 4;
 const USB_TRACE_PACKETS: bool = false;
+const MODE_CHANGE_REBOOT_DELAY: Duration = Duration::from_millis(1_000);
 const STORAGE_WRITE_DEBOUNCE: Duration =
     Duration::from_millis(crate::storage::wear::DEFAULT_COMMIT_DEBOUNCE_MS as u64);
 
@@ -56,6 +57,13 @@ pub(super) async fn run(usb0: USB0<'static>, usb_dp: GPIO20<'static>, usb_dm: GP
     loop {
         class.poll_active_entity();
         class.flush_dirty_entities(false);
+
+        if crate::usb::reboot_after_usb_flush_requested() {
+            println!("Disney Infinity USB flushing active writes before mode re-enumeration");
+            class.flush_dirty_entities(true);
+            Timer::after(MODE_CHANGE_REBOOT_DELAY).await;
+            esp_hal::system::software_reset();
+        }
 
         if usb_dev.poll(&mut [&mut class]) {
             class.poll_usb();
