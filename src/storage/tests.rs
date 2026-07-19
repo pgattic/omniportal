@@ -1,5 +1,7 @@
+use super::journal::*;
 use super::*;
 use crate::figures::skylanders::crypto::decrypt_figure;
+use crate::storage::wear::JOURNAL_RECORD_MAGIC;
 use crate::usb::skylanders::{handle_command, PortalState, PLACEMENT_STATUS_HOLD_REPORTS};
 
 fn test_identity() -> CharacterIdentity {
