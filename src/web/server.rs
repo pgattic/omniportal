@@ -308,7 +308,6 @@ fn catalog_entry_matches(
     }
 
     contains_ascii_case_insensitive(entry.name, search)
-        || contains_ascii_case_insensitive(entry.series, search)
         || format!("{}", entry.character_id).contains(search)
 }
 
@@ -327,7 +326,6 @@ fn infinity_catalog_entry_matches(
     }
 
     contains_ascii_case_insensitive(entry.name, search)
-        || contains_ascii_case_insensitive(entry.series, search)
         || format!("{}", entry.figure_number).contains(search)
 }
 
