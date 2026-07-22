@@ -9,10 +9,6 @@ use esp_wifi::wifi::{
 
 use super::board;
 
-pub fn init() {
-    let _ = (board::AP_SSID, board::AP_IP_OCTETS);
-}
-
 #[embassy_executor::task]
 pub async fn run(mut controller: WifiController<'static>) {
     let ap_config = AccessPointConfiguration {

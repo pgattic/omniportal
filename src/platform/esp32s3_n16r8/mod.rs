@@ -6,7 +6,7 @@ pub mod wifi;
 use core::mem::MaybeUninit;
 
 use crate::platform::println;
-use crate::{dhcp, figures, storage, usb, web};
+use crate::{dhcp, storage, usb, web};
 use embassy_executor::Executor;
 use embassy_net::{Ipv4Address, Ipv4Cidr, StackResources, StaticConfigV4};
 use esp_hal::rng::Rng;
@@ -68,12 +68,7 @@ pub fn run() -> ! {
 
     println!("OmniPortal ESP32-S3 Embassy firmware starting");
 
-    figures::initialize();
     storage::init();
-    dhcp::init();
-    usb::init();
-    web::init();
-    wifi::init();
 
     static EXECUTOR: StaticCell<Executor> = StaticCell::new();
     let executor = EXECUTOR.init(Executor::new());

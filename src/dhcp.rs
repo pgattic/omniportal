@@ -30,10 +30,6 @@ const MSG_OFFER: u8 = 2;
 const MSG_REQUEST: u8 = 3;
 const MSG_ACK: u8 = 5;
 
-pub fn init() {
-    let _ = (config::DHCP_POOL_START, config::DHCP_POOL_END);
-}
-
 #[embassy_executor::task]
 pub async fn run(stack: Stack<'static>) {
     stack.wait_config_up().await;

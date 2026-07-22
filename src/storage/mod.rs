@@ -34,9 +34,7 @@ use crate::storage::json::{
 use crate::storage::records::{
     BlobId, CharacterIdentity, Entity, EntityDataMode, FixedText, RecordId, StoredBlob,
 };
-use crate::storage::wear::{
-    DEFAULT_COMMIT_DEBOUNCE_MS, JOURNAL_RECORD_HEADER_BYTES, PROACTIVE_COMPACT_USED_PERCENT,
-};
+use crate::storage::wear::{JOURNAL_RECORD_HEADER_BYTES, PROACTIVE_COMPACT_USED_PERCENT};
 use crate::usb::skylanders::MAX_FIGURES;
 use alloc::format;
 use alloc::string::String;
@@ -96,7 +94,6 @@ impl StorageFlash {
 }
 
 pub fn init() {
-    let _ = DEFAULT_COMMIT_DEBOUNCE_MS;
     let mut flash = StorageFlash::new();
     let mut catalog = Catalog::new();
     let scan = scan_flash(&mut flash, &mut catalog);

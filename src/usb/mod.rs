@@ -16,11 +16,6 @@ use core::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_arch = "xtensa")]
 static REBOOT_AFTER_FLUSH_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-pub fn init() {
-    let _ = (skylanders::VID, skylanders::PID);
-    let _ = (infinity::VID, infinity::PID);
-}
-
 #[cfg(target_arch = "xtensa")]
 pub fn request_reboot_after_usb_flush() {
     REBOOT_AFTER_FLUSH_REQUESTED.store(true, Ordering::SeqCst);

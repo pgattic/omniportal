@@ -1,4 +1,4 @@
-pub const INDEX_HTML: &str = r#"<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -278,7 +278,7 @@ async function loadCatalog() {
   const kind = $("catalogKind").value;
   const search = $("catalogSearch").value.trim();
   const loaded = await api(`/api/catalog?game=${enc(game)}&kind=${enc(kind)}&q=${enc(search)}&limit=30`);
-  catalog = loaded.figures || loaded.skylanders || [];
+  catalog = loaded.figures || [];
   catalogTotal = loaded.total || catalog.length;
   renderCatalog();
 }
@@ -566,4 +566,3 @@ refreshAll();
 </script>
 </body>
 </html>
-"#;
