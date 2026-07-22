@@ -1,6 +1,55 @@
 use crate::domain::{FigureKind, GameLine};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SkylandersElement {
+    Air,
+    Earth,
+    Fire,
+    Water,
+    Magic,
+    Tech,
+    Life,
+    Undead,
+    Light,
+    Dark,
+    Unknown,
+}
+
+impl SkylandersElement {
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::Air => "air",
+            Self::Earth => "earth",
+            Self::Fire => "fire",
+            Self::Water => "water",
+            Self::Magic => "magic",
+            Self::Tech => "tech",
+            Self::Life => "life",
+            Self::Undead => "undead",
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Air => "Air",
+            Self::Earth => "Earth",
+            Self::Fire => "Fire",
+            Self::Water => "Water",
+            Self::Magic => "Magic",
+            Self::Tech => "Tech",
+            Self::Life => "Life",
+            Self::Undead => "Undead",
+            Self::Light => "Light",
+            Self::Dark => "Dark",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FigureCatalogEntry {
     pub index: u16,
     pub game_line: GameLine,
@@ -14,6 +63,108 @@ pub struct FigureCatalogEntry {
 impl FigureCatalogEntry {
     pub const fn has_variant(self) -> bool {
         self.variant_id != 0
+    }
+
+    pub const fn element(self) -> SkylandersElement {
+        skylanders_element_for_character_id(self.character_id)
+    }
+}
+
+pub const fn skylanders_element_for_character_id(character_id: u32) -> SkylandersElement {
+    match character_id {
+        0..=3 => SkylandersElement::Air,
+        4..=7 => SkylandersElement::Earth,
+        8..=11 => SkylandersElement::Fire,
+        12..=15 => SkylandersElement::Water,
+        16..=18 | 23 | 28 => SkylandersElement::Magic,
+        19..=22 => SkylandersElement::Tech,
+        24..=27 => SkylandersElement::Life,
+        29..=32 => SkylandersElement::Undead,
+        100 | 101 => SkylandersElement::Air,
+        102 | 103 => SkylandersElement::Earth,
+        104 | 105 => SkylandersElement::Fire,
+        106 | 107 => SkylandersElement::Water,
+        108 | 109 => SkylandersElement::Magic,
+        110 | 111 => SkylandersElement::Tech,
+        112 | 113 => SkylandersElement::Life,
+        114 | 115 => SkylandersElement::Undead,
+        210 => SkylandersElement::Magic,
+        211 => SkylandersElement::Water,
+        212 => SkylandersElement::Air,
+        213 => SkylandersElement::Undead,
+        214 => SkylandersElement::Tech,
+        215 => SkylandersElement::Fire,
+        216 => SkylandersElement::Earth,
+        217 => SkylandersElement::Life,
+        218 => SkylandersElement::Dark,
+        219 => SkylandersElement::Light,
+        404 => SkylandersElement::Earth,
+        416 => SkylandersElement::Magic,
+        419 => SkylandersElement::Tech,
+        430 => SkylandersElement::Undead,
+        450..=453 => SkylandersElement::Air,
+        454..=457 => SkylandersElement::Earth,
+        458..=461 => SkylandersElement::Fire,
+        462..=465 => SkylandersElement::Water,
+        466..=469 => SkylandersElement::Magic,
+        470..=473 => SkylandersElement::Tech,
+        474..=477 => SkylandersElement::Life,
+        478..=481 => SkylandersElement::Undead,
+        482 | 483 => SkylandersElement::Light,
+        484 | 485 => SkylandersElement::Dark,
+        502 => SkylandersElement::Earth,
+        503 => SkylandersElement::Magic,
+        504 => SkylandersElement::Undead,
+        505 => SkylandersElement::Earth,
+        506 => SkylandersElement::Air,
+        507 => SkylandersElement::Fire,
+        508 => SkylandersElement::Air,
+        509 => SkylandersElement::Fire,
+        510 | 519 => SkylandersElement::Tech,
+        511 => SkylandersElement::Water,
+        526 | 540 => SkylandersElement::Life,
+        541 => SkylandersElement::Water,
+        542 => SkylandersElement::Magic,
+        543 => SkylandersElement::Undead,
+        601 | 623 | 629 => SkylandersElement::Water,
+        602 | 606 | 613 => SkylandersElement::Earth,
+        603 | 605 | 614 => SkylandersElement::Undead,
+        604 | 609 | 621 | 630 => SkylandersElement::Life,
+        607 | 622 | 628 => SkylandersElement::Air,
+        608 | 612 | 620 => SkylandersElement::Fire,
+        610 | 624 | 625 | 626 | 631 => SkylandersElement::Tech,
+        611 | 617 => SkylandersElement::Dark,
+        616 | 618 => SkylandersElement::Magic,
+        619 => SkylandersElement::Light,
+        680 => SkylandersElement::Magic,
+        681 => SkylandersElement::Water,
+        682 => SkylandersElement::Air,
+        683 => SkylandersElement::Undead,
+        684 => SkylandersElement::Tech,
+        685 => SkylandersElement::Fire,
+        686 => SkylandersElement::Earth,
+        687 => SkylandersElement::Life,
+        688 => SkylandersElement::Dark,
+        689 => SkylandersElement::Light,
+        1000 | 1001 | 2000 | 2001 | 3000 | 3001 => SkylandersElement::Air,
+        1002 | 1003 | 2002 | 2003 | 3002 | 3003 => SkylandersElement::Earth,
+        1004 | 1005 | 2004 | 2005 | 3004 | 3005 => SkylandersElement::Fire,
+        1006 | 1007 | 2006 | 2007 | 3006 | 3007 => SkylandersElement::Life,
+        1008 | 1009 | 2008 | 2009 | 3008 | 3009 => SkylandersElement::Magic,
+        1010 | 1011 | 2010 | 2011 | 3010 | 3011 => SkylandersElement::Tech,
+        1012 | 1013 | 2012 | 2013 | 3012 | 3013 => SkylandersElement::Undead,
+        1014 | 1015 | 2014 | 2015 | 3014 | 3015 => SkylandersElement::Water,
+        3400 | 3417 => SkylandersElement::Undead,
+        3401 | 3414 => SkylandersElement::Tech,
+        3402 | 3420 => SkylandersElement::Magic,
+        3406 | 3413 => SkylandersElement::Air,
+        3411 | 3416 => SkylandersElement::Earth,
+        3412 | 3421 | 3424 => SkylandersElement::Fire,
+        3415 | 3423 | 3428 => SkylandersElement::Life,
+        3422 | 3425 => SkylandersElement::Water,
+        3426 => SkylandersElement::Light,
+        3427 => SkylandersElement::Dark,
+        _ => SkylandersElement::Unknown,
     }
 }
 
@@ -749,6 +900,13 @@ mod tests {
         assert_eq!(SKYLANDERS_CATALOG[0].name, "Whirlwind");
         assert_eq!(SKYLANDERS_CATALOG[0].character_id, 0);
         assert_eq!(SKYLANDERS_CATALOG[0].variant_id, 0);
+        assert_eq!(SKYLANDERS_CATALOG[0].element(), SkylandersElement::Air);
+        assert_eq!(SKYLANDERS_CATALOG[57].name, "Spyro");
+        assert_eq!(SKYLANDERS_CATALOG[57].element(), SkylandersElement::Magic);
+        assert_eq!(SKYLANDERS_CATALOG[67].name, "Trigger Happy");
+        assert_eq!(SKYLANDERS_CATALOG[67].element(), SkylandersElement::Tech);
+        assert_eq!(SKYLANDERS_CATALOG[315].name, "Knight Light");
+        assert_eq!(SKYLANDERS_CATALOG[315].element(), SkylandersElement::Light);
         assert!(SKYLANDERS_CATALOG
             .iter()
             .any(|entry| entry.kind == FigureKind::Vehicle));

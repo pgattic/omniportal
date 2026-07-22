@@ -49,6 +49,8 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 .portal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 .portal-card,.item-card{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:12px;display:grid;gap:9px;min-width:0}
 .portal-card.active{border-color:color-mix(in srgb,var(--accent) 52%,var(--line));background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.theme-card{border-left:4px solid var(--theme-color,var(--line))}
+.portal-card.active.theme-card{border-left-color:var(--theme-color,var(--accent));background:linear-gradient(90deg,color-mix(in srgb,var(--theme-color,var(--accent)) 11%,var(--surface)),var(--surface) 42%)}
 .portal-name,.item-name{font-weight:900;overflow-wrap:anywhere}
 .portal-add{border-style:dashed;align-content:center;min-height:104px}
 .portal-add button{font-size:22px;line-height:1;padding:10px 15px;border-radius:999px}
@@ -56,6 +58,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 .item-head{display:flex;justify-content:space-between;gap:10px;align-items:start;min-width:0}
 .item-head>div{min-width:0}
 .item-meta{font-size:12px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;min-width:0}
+.theme-pill{display:inline-flex;align-items:center;border:1px solid color-mix(in srgb,var(--theme-color,var(--accent)) 42%,var(--line));border-radius:999px;padding:2px 7px;color:var(--theme-color,var(--accent));background:color-mix(in srgb,var(--theme-color,var(--accent)) 10%,var(--surface));font-weight:900}
 .empty{padding:16px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);background:var(--surface);text-align:center}
 .split{display:grid;grid-template-columns:1.25fr .75fr;gap:14px}
 .catalog-actions{display:grid;grid-template-columns:1fr auto;align-items:end}
@@ -349,7 +352,7 @@ function renderCatalog() {
   const select = $("catalogSelect");
   const selected = select.value;
   select.innerHTML = catalog.map(item =>
-    `<option value="${item.index}">${escapeHtml(item.name)} (${escapeHtml(readableKind(item.kind))}, ${escapeHtml(item.series)})</option>`
+    `<option value="${item.index}">${escapeHtml(item.name)} (${escapeHtml(catalogOptionMeta(item))})</option>`
   ).join("");
   if (catalog.some(item => String(item.index) === selected)) select.value = selected;
   select.disabled = catalog.length === 0;
@@ -358,6 +361,14 @@ function renderCatalog() {
     ? `${catalogTotal} matching toys${catalogTotal > catalog.length ? `; showing first ${catalog.length}` : ""}.`
     : "No matching catalog toys.";
   updateCatalogNicknameHint();
+}
+
+function catalogOptionMeta(item) {
+  const details = [];
+  if (item.theme_label && item.theme_label !== "Unknown") details.push(item.theme_label);
+  details.push(readableKind(item.kind));
+  if (item.series && item.series !== item.theme_label) details.push(item.series);
+  return details.join(", ");
 }
 
 function updateCatalogKindOptions() {
@@ -419,8 +430,8 @@ function renderEntities() {
     const placeOrRemove = slots.length
       ? slots.map(slot => `<button onclick="removeSlot(${slot})">Remove</button>`).join("")
       : `<button class="primary" onclick="placeEntityFirstAvailable(${item.id})">Place</button>`;
-    return `<div class="item-card">` +
-      `<div class="item-head"><div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-meta">${entityMeta(item)}</div></div>${active}</div>` +
+    return `<div class="item-card${themeClass(item)}"${themeStyle(item)}>` +
+      `<div class="item-head"><div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-meta">${entityMeta(item)}${themePill(item)}</div></div>${active}</div>` +
       `<div class="actions">` +
       placeOrRemove +
       `<button onclick="cloneEntity(${item.id})">Clone</button>` +
@@ -467,10 +478,10 @@ function renderSlots() {
 }
 
 function portalCard(label, entity, slot) {
-  return `<div class="portal-card active">` +
+  return `<div class="portal-card active${themeClass(entity)}"${themeStyle(entity)}>` +
     `${label ? `<div class="meta">${escapeHtml(label)}</div>` : ""}` +
     `<div class="portal-name">${escapeHtml(entity.name)}</div>` +
-    `<div class="item-meta">${entityMeta(entity)}</div>` +
+    `<div class="item-meta">${entityMeta(entity)}${themePill(entity)}</div>` +
     `<div class="actions"><button onclick="removeSlot(${slot})">Remove</button></div>` +
     `</div>`;
 }
@@ -515,6 +526,56 @@ function entityMeta(item) {
   const details = [toy, readableKind(item.kind)];
   if (item.image_len) details.push(`${item.image_len} bytes`);
   return details.map(escapeHtml).join(" / ");
+}
+
+function themePill(item) {
+  if (!themeColor(item.theme) || !item.theme_label || item.theme_label === "Unknown") return "";
+  return `<span class="theme-pill">${escapeHtml(item.theme_label)}</span>`;
+}
+
+function themeClass(item) {
+  return themeColor(item.theme) ? " theme-card" : "";
+}
+
+function themeStyle(item) {
+  const color = themeColor(item.theme);
+  return color ? ` style="--theme-color:${color}"` : "";
+}
+
+function themeColor(theme) {
+  switch (themeKey(theme)) {
+    case "air": return "#7aa7c7";
+    case "earth": return "#8a6a3e";
+    case "fire": return "#d44728";
+    case "water": return "#2676bd";
+    case "magic": return "#8a4dd8";
+    case "tech": return "#c89318";
+    case "life": return "#2f8f46";
+    case "undead": return "#65717c";
+    case "light": return "#d2aa2c";
+    case "dark": return "#5c4f7d";
+    case "the-incredibles": return "#d23f2f";
+    case "monsters-university": return "#1f9b8a";
+    case "pirates-of-the-caribbean": return "#7b5b35";
+    case "cars": return "#c7372f";
+    case "toy-story": return "#2b75bd";
+    case "the-lone-ranger": return "#806445";
+    case "frozen": return "#4f9bd8";
+    case "marvel": return "#c93434";
+    case "star-wars": return "#8e7a32";
+    case "inside-out": return "#b54aa0";
+    case "zootopia": return "#6b8f3f";
+    case "finding-dory": return "#2384b8";
+    default: return "";
+  }
+}
+
+function themeKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function toyIdentifier(item) {

@@ -459,6 +459,8 @@ fn library_json_resolves_catalog_names_by_game_line() {
 
     let json = catalog.library_json();
     assert!(json.contains("\"figure\":\"Jack Sparrow\""));
+    assert!(json.contains("\"theme\":\"pirates-of-the-caribbean\""));
+    assert!(json.contains("\"theme_label\":\"Pirates of the Caribbean\""));
     assert!(!json.contains("Polar Whirlwind"));
 }
 

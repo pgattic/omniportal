@@ -228,8 +228,10 @@ impl Catalog {
                     GameLine::Skylanders => skylanders_catalog_entry(index).map(|entry| entry.name),
                     GameLine::Infinity => infinity_catalog_entry(index).map(|entry| entry.name),
                 });
+            let theme = entity_theme(entity);
+            let theme_label = entity_theme_label(entity);
             out.push_str(&format!(
-                "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
+                "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"theme\":\"{}\",\"theme_label\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
                 entity.id.0,
                 json_escape(entity.name.as_str()),
                 option_str_json(figure_name),
@@ -237,6 +239,8 @@ impl Catalog {
                 option_u16_json(entity.catalog_index),
                 entity.game_line.wire_name(),
                 entity.kind.wire_name(),
+                json_escape(theme.as_str()),
+                json_escape(theme_label),
                 entity.data_mode.wire_name(),
                 entity.character_id,
                 option_u32_json(entity.variant_id),
@@ -252,6 +256,68 @@ impl Catalog {
         out.push_str("}\n");
         out
     }
+}
+
+fn entity_theme(entity: &Entity) -> String {
+    match entity.game_line {
+        GameLine::Skylanders => String::from(skylanders_entity_element(entity).wire_name()),
+        GameLine::Infinity => infinity_theme_key(
+            entity
+                .catalog_index
+                .and_then(|index| infinity_catalog_entry(index).map(|entry| entry.series))
+                .unwrap_or("unknown"),
+        ),
+    }
+}
+
+fn entity_theme_label(entity: &Entity) -> &'static str {
+    match entity.game_line {
+        GameLine::Skylanders => skylanders_entity_element(entity).label(),
+        GameLine::Infinity => entity
+            .catalog_index
+            .and_then(|index| infinity_catalog_entry(index).map(|entry| entry.series))
+            .unwrap_or("Unknown"),
+    }
+}
+
+fn skylanders_entity_element(
+    entity: &Entity,
+) -> crate::figures::skylanders::catalog::SkylandersElement {
+    entity
+        .catalog_index
+        .and_then(|index| skylanders_catalog_entry(index).map(|entry| entry.element()))
+        .unwrap_or_else(|| {
+            crate::figures::skylanders::catalog::skylanders_element_for_character_id(
+                entity.character_id,
+            )
+        })
+}
+
+fn infinity_theme_key(series: &str) -> String {
+    let mut out = String::new();
+    let mut previous_dash = false;
+    for byte in series.bytes() {
+        let mapped = match byte {
+            b'a'..=b'z' => Some(byte as char),
+            b'A'..=b'Z' => Some((byte + 32) as char),
+            b'0'..=b'9' => Some(byte as char),
+            _ => None,
+        };
+        if let Some(ch) = mapped {
+            out.push(ch);
+            previous_dash = false;
+        } else if !previous_dash && !out.is_empty() {
+            out.push('-');
+            previous_dash = true;
+        }
+    }
+    if out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        out.push_str("unknown");
+    }
+    out
 }
 
 fn upsert_by_id<T: Copy, I: Eq>(

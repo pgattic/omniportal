@@ -267,12 +267,14 @@ fn push_skylanders_catalog_entry(
     entry: &crate::figures::skylanders::catalog::FigureCatalogEntry,
 ) {
     body.push_str(&format!(
-        "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"character_id\":{},\"variant_id\":{}}}",
+        "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"theme\":\"{}\",\"theme_label\":\"{}\",\"character_id\":{},\"variant_id\":{}}}",
         entry.index,
         entry.game_line.wire_name(),
         entry.kind.wire_name(),
         entry.series,
         entry.name,
+        entry.element().wire_name(),
+        entry.element().label(),
         entry.character_id,
         entry.variant_id
     ));
@@ -283,14 +285,43 @@ fn push_infinity_catalog_entry(
     entry: &crate::figures::infinity::FigureCatalogEntry,
 ) {
     body.push_str(&format!(
-        "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"figure_number\":{}}}",
+        "{{\"index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"series\":\"{}\",\"name\":\"{}\",\"theme\":\"{}\",\"theme_label\":\"{}\",\"figure_number\":{}}}",
         entry.index,
         entry.game_line.wire_name(),
         entry.kind.wire_name(),
         entry.series,
         entry.name,
+        infinity_theme_key(entry.series).as_str(),
+        entry.series,
         entry.figure_number
     ));
+}
+
+fn infinity_theme_key(series: &str) -> String {
+    let mut out = String::new();
+    let mut previous_dash = false;
+    for byte in series.bytes() {
+        let mapped = match byte {
+            b'a'..=b'z' => Some(byte as char),
+            b'A'..=b'Z' => Some((byte + 32) as char),
+            b'0'..=b'9' => Some(byte as char),
+            _ => None,
+        };
+        if let Some(ch) = mapped {
+            out.push(ch);
+            previous_dash = false;
+        } else if !previous_dash && !out.is_empty() {
+            out.push('-');
+            previous_dash = true;
+        }
+    }
+    if out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        out.push_str("unknown");
+    }
+    out
 }
 
 fn catalog_entry_matches(
