@@ -1,5 +1,6 @@
 pub mod board;
 pub mod log;
+pub mod storage_flash;
 
 use rp235x_hal as hal;
 use usb_device::{
@@ -9,10 +10,16 @@ use usb_device::{
     prelude::{StringDescriptors, UsbDeviceBuilder, UsbVidPid},
 };
 
-use crate::usb::skylanders;
+use crate::{
+    figures,
+    storage::{self, records::RecordId},
+    usb::skylanders,
+};
 
 const XTAL_FREQ_HZ: u32 = 12_000_000;
-const REPORT_QUEUE_LEN: usize = 8;
+const REPORT_QUEUE_LEN: usize = 32;
+const STORAGE_POLL_TICKS: u16 = 4_000;
+const STORAGE_WRITE_DEBOUNCE_TICKS: u16 = 8_000;
 
 pub fn run() -> ! {
     let mut pac = hal::pac::Peripherals::take().unwrap();
@@ -28,6 +35,9 @@ pub fn run() -> ! {
     )
     .ok()
     .unwrap();
+
+    figures::initialize();
+    storage::init();
 
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
         pac.USB,
@@ -57,7 +67,10 @@ pub fn run() -> ! {
         if usb_dev.poll(&mut [&mut class]) {
             class.poll_usb();
         }
+        class.poll_active_entity();
+        class.flush_dirty_entity(false);
         class.poll_in_endpoint();
+        cortex_m::asm::delay(1_000);
     }
 }
 
@@ -70,6 +83,10 @@ struct PicoSkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     out_buf: [u8; skylanders::MAX_PACKET_BYTES],
     idle_rate: u8,
     protocol: u8,
+    storage_poll_ticks: u16,
+    active_selection_marker: ([Option<u32>; skylanders::MAX_FIGURES], u32),
+    dirty_write_ticks: Option<u16>,
+    activate_ack_sent: bool,
 }
 
 impl<'a, B: usb_device::bus::UsbBus> PicoSkylandersPortalClass<'a, B> {
@@ -97,6 +114,10 @@ impl<'a, B: usb_device::bus::UsbBus> PicoSkylandersPortalClass<'a, B> {
             out_buf: [0; skylanders::MAX_PACKET_BYTES],
             idle_rate: 0,
             protocol: 1,
+            storage_poll_ticks: 0,
+            active_selection_marker: ([None; skylanders::MAX_FIGURES], 0),
+            dirty_write_ticks: None,
+            activate_ack_sent: false,
         }
     }
 
@@ -123,14 +144,153 @@ impl<'a, B: usb_device::bus::UsbBus> PicoSkylandersPortalClass<'a, B> {
                 Err(UsbError::WouldBlock) => self.push_report_front(report),
                 Err(_) => {}
             }
+            return;
+        }
+
+        if self.state.has_present_entities() {
+            let report = self.state.next_status_report();
+            let _ = self.ep_in.write(&report);
         }
     }
 
     fn handle_command(&mut self, command: &[u8]) {
+        let suppress_duplicate_activate_ack =
+            matches!(command, [b'A', active, ..] if *active != 0) && self.activate_ack_sent;
+        self.handle_activation_state(command);
         if let Some(response) = skylanders::handle_command(&mut self.state, command) {
-            if response.queue_report {
-                self.push_report(response.report);
+            if command.first().copied() == Some(b'W')
+                && response.report[0] == b'W'
+                && response.report[1] >= skylanders::FIRST_FIGURE_SLOT_ID
+            {
+                self.schedule_dirty_flush();
             }
+            if matches!(command, [b'A', active, ..] if *active != 0) && response.queue_report {
+                self.activate_ack_sent = true;
+            }
+            if response.queue_report && !suppress_duplicate_activate_ack {
+                self.push_command_response(response.report);
+            }
+        }
+    }
+
+    fn handle_activation_state(&mut self, command: &[u8]) {
+        match command {
+            [b'A', active, ..] if *active == 0 => {
+                self.activate_ack_sent = false;
+                self.active_selection_marker = ([None; skylanders::MAX_FIGURES], 0);
+            }
+            _ => {}
+        }
+    }
+
+    fn poll_active_entity(&mut self) {
+        if !self.state.active {
+            return;
+        }
+
+        if self.storage_poll_ticks > 0 {
+            self.storage_poll_ticks -= 1;
+            return;
+        }
+        self.storage_poll_ticks = STORAGE_POLL_TICKS;
+
+        let (active_slots, active_generation) = storage::active_slots_marker();
+        let active_marker = (active_slots.map(|id| id.map(|id| id.0)), active_generation);
+        if active_marker == self.active_selection_marker {
+            return;
+        }
+
+        self.flush_dirty_entity(true);
+        match storage::active_slot_images() {
+            Ok(images) => {
+                let mut placement_changed = false;
+                for slot in 0..skylanders::MAX_FIGURES {
+                    if active_marker.0[slot].is_none()
+                        && self.state.slot_entity_id(slot as u8).is_some()
+                    {
+                        self.state.clear_slot(slot as u8);
+                        placement_changed = true;
+                    }
+                }
+
+                for (slot, id, image) in images {
+                    if self.state.slot_entity_id(slot) == Some(id.0) {
+                        continue;
+                    }
+                    if self.state.load_entity_into_slot(slot, id.0, &image) {
+                        placement_changed = true;
+                    } else {
+                        self.state.clear_slot(slot);
+                    }
+                }
+
+                self.active_selection_marker = active_marker;
+                if placement_changed {
+                    self.queue_status_reports(REPORT_QUEUE_LEN);
+                }
+            }
+            Err(_) => {
+                self.state.clear_all_entities();
+                self.active_selection_marker = ([None; skylanders::MAX_FIGURES], 0);
+            }
+        }
+    }
+
+    fn queue_status_reports(&mut self, count: usize) {
+        for _ in 0..count {
+            let report = self.state.next_status_report();
+            self.push_report(report);
+        }
+    }
+
+    fn schedule_dirty_flush(&mut self) {
+        if self.state.is_dirty() {
+            self.dirty_write_ticks = Some(STORAGE_WRITE_DEBOUNCE_TICKS);
+        }
+    }
+
+    fn flush_dirty_entity(&mut self, force: bool) {
+        if !self.state.is_dirty() {
+            self.dirty_write_ticks = None;
+            return;
+        }
+
+        if !force {
+            match self.dirty_write_ticks {
+                Some(0) => {}
+                Some(ticks) => {
+                    self.dirty_write_ticks = Some(ticks - 1);
+                    return;
+                }
+                None => {
+                    self.schedule_dirty_flush();
+                    return;
+                }
+            }
+        }
+
+        let mut persisted = false;
+        for slot in 0..skylanders::MAX_FIGURES {
+            let slot = slot as u8;
+            if !self.state.is_slot_dirty(slot) {
+                continue;
+            }
+            let Some(id) = self.state.slot_entity_id(slot) else {
+                self.state.clear_slot_dirty(slot);
+                continue;
+            };
+            let Some(image) = self.state.slot_image(slot).copied() else {
+                self.state.clear_slot_dirty(slot);
+                continue;
+            };
+            if storage::replace_entity_blob(RecordId(id), &image).is_ok() {
+                self.state.clear_slot_dirty(slot);
+                persisted = true;
+            }
+        }
+
+        if persisted || !self.state.is_dirty() {
+            self.dirty_write_ticks = None;
         }
     }
 
@@ -147,6 +307,14 @@ impl<'a, B: usb_device::bus::UsbBus> PicoSkylandersPortalClass<'a, B> {
             self.queue[index] = self.queue[index - 1];
         }
         self.queue[0] = Some(report);
+    }
+
+    fn push_command_response(&mut self, report: skylanders::Report) {
+        if self.queue[0].is_none() {
+            self.queue[0] = Some(report);
+        } else {
+            self.push_report_front(report);
+        }
     }
 
     fn pop_report(&mut self) -> Option<skylanders::Report> {

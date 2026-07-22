@@ -308,13 +308,16 @@ Current Pico 2 W status:
 - [x] Add an RP2350/Pico 2 W target path that builds from the shared crate.
 - [x] Produce a UF2 artifact for drag-and-drop flashing.
 - [x] Bring up a USB-only Skylanders Portal of Power probe target.
-- [ ] Test the Pico 2 W image with `scripts/probe-skylanders-portal.py`.
-- [ ] Add Pico 2 W flash storage.
+- [x] Test the Pico 2 W image with `scripts/probe-skylanders-portal.py` and Wii empty-portal flow.
+- [x] Add initial Pico 2 W flash storage.
+- [x] Wire a stored/preloaded Skylanders entity into Pico USB portal state.
 - [ ] Add Pico 2 W CYW43 AP + DHCP + web UI.
 - [ ] Add Pico 2 W Disney Infinity USB mode.
 
 Expected remaining work:
-- AP + web UI parity: moderate work, mainly CYW43 AP mode and networking integration.
+- AP + web UI parity: moderate work. The HTTP route dispatch is shared now, but
+  Pico 2 W still needs CYW43 AP mode, DHCP/networking, and an async platform
+  runtime that can run USB and TCP work together.
 - USB parity: moderate to high work, depending on how cleanly the USB/device protocol code was separated.
 - End-to-end Wii validation: still required; protocol logic reuse does not eliminate host-specific USB quirks.
 

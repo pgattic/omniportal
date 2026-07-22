@@ -57,9 +57,9 @@ Hold BOOTSEL while plugging in the Pico 2 W, copy the UF2 to the mounted
 sudo python scripts/probe-skylanders-portal.py
 ```
 
-The Pico 2 W image currently brings up the USB Skylanders Portal of Power
-personality only. Wi-Fi, storage-backed collection state, and Disney Infinity
-mode still need platform backend work.
+The Pico 2 W image currently brings up a USB Skylanders Portal of Power
+personality backed by the shared flash storage/catalog model. Wi-Fi/web UI and
+Disney Infinity mode still need platform backend work.
 
 ## Code Structure
 
@@ -71,12 +71,12 @@ from board firmware wiring:
 * `figures/` - figure identity and image helpers
 * `storage/` - flash-backed catalog, records, and host-testable journal logic
 * `usb/` - Skylanders and Disney Infinity USB descriptors and protocol helpers
-* `web/` - HTTP parsing plus ESP32-S3 server wiring
+* `web/` - shared HTTP route dispatch plus ESP32-S3 server wiring
 * `dhcp.rs` - ESP32-S3 DHCPv4 server for AP clients
 * `platform/esp32s3_n16r8/` - ESP32-S3 board entrypoint, WiFi, logging,
   flash adapter, heap setup, and board constants
-* `platform/rp2350_pico2w/` - initial Pico 2 W board entrypoint and USB-only
-  Skylanders probe target
+* `platform/rp2350_pico2w/` - Pico 2 W board entrypoint, flash adapter, and
+  USB Skylanders target
 * `config.rs` - temporary facade over platform board constants
 
 Firmware-only modules are compiled for their board targets. Host builds compile

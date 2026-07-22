@@ -1,3 +1,4 @@
+pub mod dispatch;
 pub mod http;
 pub mod routes;
 #[cfg(target_arch = "xtensa")]

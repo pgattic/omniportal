@@ -17,7 +17,7 @@ use crate::figures::skylanders::image::{
 };
 #[cfg(target_arch = "xtensa")]
 use crate::platform::println;
-#[cfg(target_arch = "xtensa")]
+#[cfg(any(target_arch = "xtensa", target_arch = "arm"))]
 use crate::platform::StorageFlash;
 use crate::storage::catalog::Catalog;
 use crate::storage::forms::{decode_hex_bytes, parse_game_param, parse_u32, query_param};
@@ -52,12 +52,12 @@ pub mod wear;
 
 static STORE: Mutex<RefCell<Option<Store>>> = Mutex::new(RefCell::new(None));
 
-#[cfg(not(target_arch = "xtensa"))]
+#[cfg(not(any(target_arch = "xtensa", target_arch = "arm")))]
 struct StorageFlash {
     bytes: Vec<u8>,
 }
 
-#[cfg(not(target_arch = "xtensa"))]
+#[cfg(not(any(target_arch = "xtensa", target_arch = "arm")))]
 impl StorageFlash {
     fn new() -> Self {
         let mut bytes = Vec::new();
