@@ -21,6 +21,9 @@ button:disabled{opacity:.52;cursor:not-allowed}
 button.primary{background:var(--accent-fill);border-color:var(--accent-fill);color:#fff}
 button.danger{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}
 button.ghost{background:transparent}
+.icon{width:18px;height:18px;display:block;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;fill:none}
+.icon-button{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;flex:0 0 40px}
+.icon-button.primary,.icon-button.danger{color:#fff}
 input,select{width:100%;padding:10px 11px}
 label{display:grid;gap:5px;font-size:12px;margin:8px 0;font-weight:800;color:var(--muted);text-transform:uppercase}
 a{color:var(--accent);font-weight:800;text-decoration:none}
@@ -46,6 +49,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0}
 .actions button,.actions a{flex:0 1 auto}
 .actions a{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:var(--control);padding:9px 12px}
+.actions .icon-button{flex:0 0 40px;padding:0}
 .portal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 .portal-card,.item-card{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:12px;display:grid;gap:9px;min-width:0}
 .portal-card.active{border-color:color-mix(in srgb,var(--accent) 52%,var(--line));background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
@@ -54,6 +58,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 .portal-name,.item-name{font-weight:900;overflow-wrap:anywhere}
 .portal-add{border-style:dashed;align-content:center;min-height:104px}
 .portal-add button{font-size:22px;line-height:1;padding:10px 15px;border-radius:999px}
+.portal-add .icon-button{width:40px;height:40px;padding:0}
 .list{display:grid;gap:9px}
 .item-head{display:flex;justify-content:space-between;gap:10px;align-items:start;min-width:0}
 .item-head>div{min-width:0}
@@ -74,6 +79,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
   .mode-pill{display:grid;grid-template-columns:1fr 1fr;justify-self:stretch}
   .mode-pill select{grid-column:1/-1;width:100%;min-width:0}
   .mode-pill button{width:100%}
+  .mode-pill .icon-button{width:100%}
   .row{display:grid;gap:12px}
   .row>*{min-width:0}
   .split{grid-template-columns:1fr}
@@ -82,10 +88,22 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
   .catalog-actions{grid-template-columns:1fr}
   .actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px}
   .actions button,.actions a{width:100%;text-align:center}
+  .item-card .actions,.portal-card .actions{display:flex}
+  .item-card .actions .icon-button,.portal-card .actions .icon-button{width:40px}
 }
 </style>
 </head>
 <body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden" xmlns="http://www.w3.org/2000/svg">
+<symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.3 6.4"/><path d="M3 12A9 9 0 0 1 18.3 5.6"/><path d="M20 2v6h-6"/><path d="M4 22v-6h6"/></symbol>
+<symbol id="icon-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+<symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+<symbol id="icon-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+<symbol id="icon-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+<symbol id="icon-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+<symbol id="icon-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+<symbol id="icon-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
+</svg>
 <header>
 <div class="topbar">
 <div>
@@ -98,7 +116,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 <option value="infinity">Disney Infinity</option>
 </select>
 <button onclick="switchMode()">Save</button>
-<button class="ghost" onclick="refreshAll()">Refresh</button>
+<button class="ghost icon-button" title="Refresh" aria-label="Refresh" onclick="refreshAll()"><svg class="icon" aria-hidden="true"><use href="#icon-refresh"></use></svg></button>
 </div>
 </div>
 </header>
@@ -113,7 +131,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 <div class="panel hero">
 <div class="hero-head">
 <h2 id="deviceHeading">Device</h2>
-<button id="clearDeviceButton" onclick="clearActive()">Clear</button>
+<button id="clearDeviceButton" class="icon-button" title="Clear" aria-label="Clear" onclick="clearActive()"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
 </div>
 <div id="slots" class="portal-grid"></div>
 </div>
@@ -325,6 +343,19 @@ function statusCell(label, value) {
   return `<div class="status-cell"><div class="status-label">${escapeHtml(label)}</div><div class="status-value">${escapeHtml(value)}</div></div>`;
 }
 
+function icon(name) {
+  return `<svg class="icon" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
+}
+
+function iconButton(label, iconName, onclick, classes = "") {
+  const className = `icon-button${classes ? ` ${classes}` : ""}`;
+  return `<button class="${className}" type="button" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" onclick="${onclick}">${icon(iconName)}</button>`;
+}
+
+function iconLink(label, iconName, href) {
+  return `<a class="icon-button" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" href="${href}">${icon(iconName)}</a>`;
+}
+
 async function switchMode() {
   const mode = $("modeSelect").value;
   try {
@@ -428,16 +459,16 @@ function renderEntities() {
     const slots = activeSlots.filter(slot => slot.entity_id === item.id).map(slot => Number(slot.slot));
     const active = slots.length ? `<span class="pill ok">Active</span>` : "";
     const placeOrRemove = slots.length
-      ? slots.map(slot => `<button onclick="removeSlot(${slot})">Remove</button>`).join("")
-      : `<button class="primary" onclick="placeEntityFirstAvailable(${item.id})">Place</button>`;
+      ? slots.map(slot => iconButton("Remove", "minus", `removeSlot(${slot})`)).join("")
+      : iconButton("Place", "plus", `placeEntityFirstAvailable(${item.id})`, "primary");
     return `<div class="item-card${themeClass(item)}"${themeStyle(item)}>` +
       `<div class="item-head"><div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-meta">${entityMeta(item)}${themePill(item)}</div></div>${active}</div>` +
       `<div class="actions">` +
       placeOrRemove +
-      `<button onclick="cloneEntity(${item.id})">Clone</button>` +
-      `<button onclick="renameRecord('entity',${item.id})">Rename</button>` +
-      `<a href="/api/entity/${item.id}.bin">Export</a>` +
-      `<button class="danger" onclick="deleteRecord('entity',${item.id})">Delete</button>` +
+      iconButton("Clone", "copy", `cloneEntity(${item.id})`) +
+      iconButton("Rename", "edit", `renameRecord('entity',${item.id})`) +
+      iconLink("Export", "download", `/api/entity/${item.id}.bin`) +
+      iconButton("Delete", "trash", `deleteRecord('entity',${item.id})`, "danger") +
       `</div></div>`;
   }).join("") || `<div class="empty">No ${displayMode(currentMode)} collection items.</div>`;
 }
@@ -482,7 +513,7 @@ function portalCard(label, entity, slot) {
     `${label ? `<div class="meta">${escapeHtml(label)}</div>` : ""}` +
     `<div class="portal-name">${escapeHtml(entity.name)}</div>` +
     `<div class="item-meta">${entityMeta(entity)}${themePill(entity)}</div>` +
-    `<div class="actions"><button onclick="removeSlot(${slot})">Remove</button></div>` +
+    `<div class="actions">${iconButton("Remove", "minus", `removeSlot(${slot})`)}</div>` +
     `</div>`;
 }
 
@@ -493,7 +524,7 @@ function portalAddCard(label, options, slot) {
     `<div class="portal-name">${escapeHtml(label)}</div>` +
     `<div class="actions">` +
     `<select id="${id}">${options}</select>` +
-    `<button title="Place on ${deviceName()}" onclick="${action}" ${options ? "" : "disabled"}>+</button>` +
+    `<button class="icon-button primary" type="button" title="Place on ${deviceName()}" aria-label="Place on ${deviceName()}" onclick="${action}" ${options ? "" : "disabled"}>${icon("plus")}</button>` +
     `</div></div>`;
 }
 
