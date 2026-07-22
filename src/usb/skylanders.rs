@@ -303,6 +303,9 @@ impl PortalState {
         }
 
         let offset = block as usize * FIGURE_BLOCK_BYTES;
+        if slot_state.image[offset..offset + FIGURE_BLOCK_BYTES] == data[..FIGURE_BLOCK_BYTES] {
+            return write_response(slot, block, true);
+        }
         slot_state.image[offset..offset + FIGURE_BLOCK_BYTES]
             .copy_from_slice(&data[..FIGURE_BLOCK_BYTES]);
         slot_state.dirty = true;

@@ -249,31 +249,8 @@ fn decodes_form_hex_image_payload() {
 
 #[test]
 fn write_back_loop_exports_replaced_entity_image() {
-    let mut store = Store {
-        flash: StorageFlash::new(),
-        catalog: Catalog::new(),
-    };
-    append_record(
-        &mut store.flash,
-        &mut store.catalog,
-        RECORD_KIND_FORMAT_MARKER,
-        0,
-        1,
-        b"omniportal-storage-v1",
-    )
-    .unwrap();
-
     let entity_id = RecordId(8);
-    let image = initialize_new_entity_image(FigureKind::Character, 19, None, entity_id.0);
-    let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image).unwrap();
-    let mut entity = test_entity();
-    entity.id = entity_id;
-    entity.character_id = 19;
-    entity.variant_id = None;
-    entity.catalog_index = Some(67);
-    entity.blob_id = Some(blob_id);
-    entity.image_crc32 = crc32(&image);
-    append_entity_record(&mut store, entity).unwrap();
+    let (mut store, image) = store_with_mutable_entity(entity_id);
 
     let mut portal = PortalState::new();
     assert!(portal.load_entity_into_slot(0, entity_id.0, &image));
@@ -303,6 +280,83 @@ fn write_back_loop_exports_replaced_entity_image() {
 }
 
 #[test]
+fn replacing_entity_with_unchanged_image_does_not_append_records() {
+    let entity_id = RecordId(8);
+    let (mut store, image) = store_with_mutable_entity(entity_id);
+    let used_before = store.catalog.write_offset;
+
+    replace_entity_blob_in_store(&mut store, entity_id, &image).unwrap();
+
+    assert_eq!(store.catalog.write_offset, used_before);
+}
+
+#[test]
+fn replacing_entity_blob_auto_compacts_when_journal_is_full() {
+    let entity_id = RecordId(8);
+    let (mut store, image) = full_store_with_mutable_entity(entity_id);
+    store.catalog.active_slots[0] = Some(entity_id);
+    store.catalog.usb_mode = GameLine::Infinity;
+
+    let used_before = store.catalog.write_offset;
+    let mut changed = image;
+    changed[0x20] ^= 0x5a;
+    replace_entity_blob_in_store(&mut store, entity_id, &changed).unwrap();
+
+    assert!(store.catalog.write_offset < used_before);
+    assert_eq!(store.catalog.active_slots[0], Some(entity_id));
+    assert_eq!(store.catalog.usb_mode, GameLine::Infinity);
+    assert_eq!(
+        read_entity_blob_from_store(&mut store, entity_id).unwrap(),
+        changed
+    );
+}
+
+#[test]
+fn replacing_entity_blob_proactively_compacts_above_usage_threshold() {
+    let entity_id = RecordId(8);
+    let (mut store, image) = store_with_mutable_entity(entity_id);
+    store.catalog.active_slots[0] = Some(entity_id);
+    let mut stale = [0x44; 1024];
+    let stale_record_len = journal_record_len(stale.len());
+    let target = crate::config::STORAGE_FLASH_BYTES
+        * crate::storage::wear::PROACTIVE_COMPACT_USED_PERCENT
+        / 100;
+    let mut record_id = 20_000;
+
+    while store.catalog.write_offset < target
+        && store.catalog.write_offset + stale_record_len < crate::config::STORAGE_FLASH_BYTES
+    {
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_BLOB_DATA,
+            record_id,
+            record_id,
+            &stale,
+        )
+        .unwrap();
+        stale[0] = stale[0].wrapping_add(1);
+        record_id += 1;
+    }
+    assert!(
+        journal_usage_percent(store.catalog.write_offset)
+            >= crate::storage::wear::PROACTIVE_COMPACT_USED_PERCENT
+    );
+
+    let used_before = store.catalog.write_offset;
+    let mut changed = image;
+    changed[0x20] ^= 0x33;
+    replace_entity_blob_in_store(&mut store, entity_id, &changed).unwrap();
+
+    assert!(store.catalog.write_offset < used_before);
+    assert_eq!(store.catalog.active_slots[0], Some(entity_id));
+    assert_eq!(
+        read_entity_blob_from_store(&mut store, entity_id).unwrap(),
+        changed
+    );
+}
+
+#[test]
 fn catalog_upsert_replace_delete_and_active_selection_behave() {
     let mut catalog = Catalog::new();
     let mut identity = test_identity();
@@ -323,6 +377,72 @@ fn catalog_upsert_replace_delete_and_active_selection_behave() {
     catalog.delete_entity(entity.id).unwrap();
     assert_eq!(catalog.entity_count(), 0);
     assert_eq!(catalog.active_entity_id(), None);
+}
+
+fn store_with_mutable_entity(entity_id: RecordId) -> (Store, Vec<u8>) {
+    let mut store = Store {
+        flash: StorageFlash::new(),
+        catalog: Catalog::new(),
+    };
+    append_record(
+        &mut store.flash,
+        &mut store.catalog,
+        RECORD_KIND_FORMAT_MARKER,
+        0,
+        1,
+        b"omniportal-storage-v1",
+    )
+    .unwrap();
+
+    let image = initialize_new_entity_image(FigureKind::Character, 19, None, entity_id.0);
+    let blob_id = append_blob(&mut store.flash, &mut store.catalog, &image).unwrap();
+    let mut entity = test_entity();
+    entity.id = entity_id;
+    entity.character_id = 19;
+    entity.variant_id = None;
+    entity.catalog_index = Some(67);
+    entity.blob_id = Some(blob_id);
+    entity.image_crc32 = crc32(&image);
+    append_entity_record(&mut store, entity).unwrap();
+
+    (store, image.to_vec())
+}
+
+fn full_store_with_mutable_entity(entity_id: RecordId) -> (Store, Vec<u8>) {
+    let (mut store, image) = store_with_mutable_entity(entity_id);
+    let mut stale = [0x55; 1024];
+    let required = journal_record_len(image.len()) + journal_record_len(128);
+    let stale_record_len = journal_record_len(stale.len());
+    let mut record_id = 10_000;
+
+    while store.catalog.write_offset + stale_record_len <= crate::config::STORAGE_FLASH_BYTES {
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_BLOB_DATA,
+            record_id,
+            record_id,
+            &stale,
+        )
+        .unwrap();
+        stale[0] = stale[0].wrapping_add(1);
+        record_id += 1;
+    }
+    while store.catalog.write_offset + journal_record_len(0) <= crate::config::STORAGE_FLASH_BYTES {
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_ENTITY_DELETE,
+            record_id,
+            record_id,
+            &[],
+        )
+        .unwrap();
+        record_id += 1;
+    }
+    assert!(store.catalog.write_offset + required > crate::config::STORAGE_FLASH_BYTES);
+
+    (store, image)
 }
 
 #[test]

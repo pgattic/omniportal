@@ -88,12 +88,18 @@ After connecting, the root page should show the OmniPortal control UI, and
 The firmware uses an explicit `omniportal` data partition for the append-only
 journal:
 
-* offset: `0x00fb0000`
-* size: `0x00040000`
+* offset: `0x00e00000`
+* size: `0x00200000`
 
 The partition table lives at `partitions/esp32s3-n16r8.csv`. The factory app
 partition remains at `0x10000` and is sized to end immediately before the
 OmniPortal storage partition.
+
+Console save writes are buffered in RAM while a toy is active. The firmware
+flushes changed images on removal, mode switch/reset, and periodic checkpoints;
+unchanged block writes are ignored. If the journal does not have enough space
+for a save checkpoint, the firmware compacts storage automatically before
+writing.
 
 Useful read endpoints:
 

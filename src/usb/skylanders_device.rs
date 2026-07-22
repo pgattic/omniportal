@@ -307,6 +307,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
                         "Skylanders USB failed to persist writes for slot {} entity {}: {:?}",
                         slot, id, error
                     );
+                    self.schedule_dirty_flush();
                 }
             }
         }

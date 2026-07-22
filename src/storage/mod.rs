@@ -34,7 +34,9 @@ use crate::storage::json::{
 use crate::storage::records::{
     BlobId, CharacterIdentity, Entity, EntityDataMode, FixedText, RecordId, StoredBlob,
 };
-use crate::storage::wear::{DEFAULT_COMMIT_DEBOUNCE_MS, JOURNAL_RECORD_HEADER_BYTES};
+use crate::storage::wear::{
+    DEFAULT_COMMIT_DEBOUNCE_MS, JOURNAL_RECORD_HEADER_BYTES, PROACTIVE_COMPACT_USED_PERCENT,
+};
 use crate::usb::skylanders::MAX_FIGURES;
 use alloc::format;
 use alloc::string::String;
@@ -764,119 +766,155 @@ pub fn clear_active_entity_from_params(params: &str) -> Result<String, StorageEr
 
 pub fn compact_storage() -> Result<String, StorageError> {
     with_store_mut(|store| {
-        let mut blob_ids = Vec::new();
-        for blob in store.catalog.blobs.iter().flatten() {
-            let is_live_entity = store
-                .catalog
-                .entities
-                .iter()
-                .flatten()
-                .any(|entity| entity.blob_id == Some(blob.id));
-            if is_live_entity {
-                blob_ids.push(blob.id);
-            }
-        }
-        let mut blobs = Vec::new();
-        for blob_id in blob_ids {
-            blobs.push((blob_id, read_blob(store, blob_id)?));
-        }
-
-        let identities = store.catalog.identities;
-        let entities = store.catalog.entities;
-        let next_record_id = store.catalog.next_record_id;
-        let next_blob_id = store.catalog.next_blob_id;
-        let mut generation = store.catalog.next_generation;
-
-        store
-            .flash
-            .erase(
-                config::STORAGE_FLASH_OFFSET,
-                config::STORAGE_FLASH_OFFSET + config::STORAGE_FLASH_BYTES,
-            )
-            .map_err(|_| StorageError::Flash)?;
-        store.catalog = Catalog::new();
-        store.catalog.next_record_id = next_record_id;
-        store.catalog.next_blob_id = next_blob_id;
-        store.catalog.next_generation = generation;
-
-        append_record(
-            &mut store.flash,
-            &mut store.catalog,
-            RECORD_KIND_FORMAT_MARKER,
-            0,
-            generation,
-            b"omniportal-storage-v1",
-        )?;
-        generation += 1;
-
-        for (blob_id, image) in blobs {
-            append_record(
-                &mut store.flash,
-                &mut store.catalog,
-                RECORD_KIND_BLOB_DATA,
-                blob_id.0,
-                generation,
-                &image,
-            )?;
-            store.catalog.upsert_blob(StoredBlob {
-                id: blob_id,
-                offset: store.catalog.write_offset
-                    - align4(JOURNAL_RECORD_HEADER_BYTES as u32 + image.len() as u32)
-                    + JOURNAL_RECORD_HEADER_BYTES as u32,
-                len: image.len() as u32,
-                crc32: crc32(&image),
-                generation,
-            })?;
-            generation += 1;
-        }
-
-        for identity in identities.iter().flatten().copied() {
-            let mut identity = identity;
-            identity.generation = generation;
-            append_record(
-                &mut store.flash,
-                &mut store.catalog,
-                RECORD_KIND_IDENTITY_UPSERT,
-                identity.id.0,
-                generation,
-                &encode_identity(&identity),
-            )?;
-            store.catalog.upsert_identity(identity)?;
-            generation += 1;
-        }
-
-        for entity in entities.iter().flatten().copied() {
-            let mut entity = entity;
-            entity.updated_generation = generation;
-            append_record(
-                &mut store.flash,
-                &mut store.catalog,
-                RECORD_KIND_ENTITY_UPSERT,
-                entity.id.0,
-                generation,
-                &encode_entity(&entity),
-            )?;
-            store.catalog.upsert_entity(entity)?;
-            generation += 1;
-        }
-
-        store.catalog.active_config_generation = generation;
-        let payload = encode_config(store.catalog.active_slots, store.catalog.usb_mode);
-        append_record(
-            &mut store.flash,
-            &mut store.catalog,
-            RECORD_KIND_CONFIG_UPSERT,
-            0,
-            generation,
-            &payload,
-        )?;
-
-        store.catalog.next_generation = generation;
+        compact_store(store)?;
         Ok(format!(
             "{{\"compacted\":true,\"used_bytes\":{}}}\n",
             store.catalog.write_offset
         ))
     })
+}
+
+fn ensure_journal_space(store: &mut Store, required_bytes: u32) -> Result<(), StorageError> {
+    if journal_usage_percent(store.catalog.write_offset) >= PROACTIVE_COMPACT_USED_PERCENT {
+        compact_store(store)?;
+    }
+
+    if store.catalog.write_offset + required_bytes <= config::STORAGE_FLASH_BYTES {
+        return Ok(());
+    }
+
+    compact_store(store)?;
+    if store.catalog.write_offset + required_bytes <= config::STORAGE_FLASH_BYTES {
+        Ok(())
+    } else {
+        Err(StorageError::Full)
+    }
+}
+
+fn compact_store(store: &mut Store) -> Result<(), StorageError> {
+    let mut blob_ids = Vec::new();
+    for blob in store.catalog.blobs.iter().flatten() {
+        let is_live_entity = store
+            .catalog
+            .entities
+            .iter()
+            .flatten()
+            .any(|entity| entity.blob_id == Some(blob.id));
+        if is_live_entity {
+            blob_ids.push(blob.id);
+        }
+    }
+    let mut blobs = Vec::new();
+    for blob_id in blob_ids {
+        blobs.push((blob_id, read_blob(store, blob_id)?));
+    }
+
+    let identities = store.catalog.identities;
+    let entities = store.catalog.entities;
+    let next_record_id = store.catalog.next_record_id;
+    let next_blob_id = store.catalog.next_blob_id;
+    let active_slots = store.catalog.active_slots;
+    let usb_mode = store.catalog.usb_mode;
+    let mut generation = store.catalog.next_generation;
+
+    store
+        .flash
+        .erase(
+            config::STORAGE_FLASH_OFFSET,
+            config::STORAGE_FLASH_OFFSET + config::STORAGE_FLASH_BYTES,
+        )
+        .map_err(|_| StorageError::Flash)?;
+    store.catalog = Catalog::new();
+    store.catalog.next_record_id = next_record_id;
+    store.catalog.next_blob_id = next_blob_id;
+    store.catalog.next_generation = generation;
+
+    append_record(
+        &mut store.flash,
+        &mut store.catalog,
+        RECORD_KIND_FORMAT_MARKER,
+        0,
+        generation,
+        b"omniportal-storage-v1",
+    )?;
+    generation += 1;
+
+    for (blob_id, image) in blobs {
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_BLOB_DATA,
+            blob_id.0,
+            generation,
+            &image,
+        )?;
+        store.catalog.upsert_blob(StoredBlob {
+            id: blob_id,
+            offset: store.catalog.write_offset
+                - align4(JOURNAL_RECORD_HEADER_BYTES as u32 + image.len() as u32)
+                + JOURNAL_RECORD_HEADER_BYTES as u32,
+            len: image.len() as u32,
+            crc32: crc32(&image),
+            generation,
+        })?;
+        generation += 1;
+    }
+
+    for identity in identities.iter().flatten().copied() {
+        let mut identity = identity;
+        identity.generation = generation;
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_IDENTITY_UPSERT,
+            identity.id.0,
+            generation,
+            &encode_identity(&identity),
+        )?;
+        store.catalog.upsert_identity(identity)?;
+        generation += 1;
+    }
+
+    for entity in entities.iter().flatten().copied() {
+        let mut entity = entity;
+        entity.updated_generation = generation;
+        append_record(
+            &mut store.flash,
+            &mut store.catalog,
+            RECORD_KIND_ENTITY_UPSERT,
+            entity.id.0,
+            generation,
+            &encode_entity(&entity),
+        )?;
+        store.catalog.upsert_entity(entity)?;
+        generation += 1;
+    }
+
+    store.catalog.active_slots = active_slots;
+    store.catalog.usb_mode = usb_mode;
+    store.catalog.active_config_generation = generation;
+    let payload = encode_config(store.catalog.active_slots, store.catalog.usb_mode);
+    append_record(
+        &mut store.flash,
+        &mut store.catalog,
+        RECORD_KIND_CONFIG_UPSERT,
+        0,
+        generation,
+        &payload,
+    )?;
+    store.catalog.next_generation = generation + 1;
+    Ok(())
+}
+
+fn journal_record_len(payload_len: usize) -> u32 {
+    align4(JOURNAL_RECORD_HEADER_BYTES as u32 + payload_len as u32)
+}
+
+fn journal_usage_percent(write_offset: u32) -> u32 {
+    if config::STORAGE_FLASH_BYTES == 0 {
+        return 100;
+    }
+    write_offset.saturating_mul(100) / config::STORAGE_FLASH_BYTES
 }
 
 pub fn format_storage() -> Result<String, StorageError> {
@@ -961,6 +999,17 @@ fn replace_entity_blob_in_store(
         .catalog
         .entity(entity_id)
         .ok_or(StorageError::NotFound)?;
+    if read_entity_image(store, entity)
+        .map(|current| current == image)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    let required_bytes =
+        journal_record_len(image.len()) + journal_record_len(core::mem::size_of::<[u8; 128]>());
+    ensure_journal_space(store, required_bytes)?;
+
     let blob_id = append_blob(&mut store.flash, &mut store.catalog, image)?;
     entity.blob_id = Some(blob_id);
     entity.data_mode = EntityDataMode::MutableImage;

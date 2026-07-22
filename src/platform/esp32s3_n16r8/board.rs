@@ -7,5 +7,5 @@ pub const DHCP_POOL_END: u8 = 199;
 pub const DHCP_LEASE_SECONDS: u32 = 24 * 60 * 60;
 
 // Matches the "omniportal" data partition in partitions/esp32s3-n16r8.csv.
-pub const STORAGE_FLASH_OFFSET: u32 = 0x00fb_0000;
-pub const STORAGE_FLASH_BYTES: u32 = 256 * 1024;
+pub const STORAGE_FLASH_OFFSET: u32 = 0x00e0_0000;
+pub const STORAGE_FLASH_BYTES: u32 = 2 * 1024 * 1024;

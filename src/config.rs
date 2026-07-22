@@ -19,4 +19,4 @@ pub const DHCP_LEASE_SECONDS: u32 = 24 * 60 * 60;
 #[cfg(not(target_arch = "xtensa"))]
 pub const STORAGE_FLASH_OFFSET: u32 = 0;
 #[cfg(not(target_arch = "xtensa"))]
-pub const STORAGE_FLASH_BYTES: u32 = 256 * 1024;
+pub const STORAGE_FLASH_BYTES: u32 = 2 * 1024 * 1024;
