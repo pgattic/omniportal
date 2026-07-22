@@ -45,6 +45,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 .row>*{flex:1 1 180px;min-width:0}
 .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-width:0}
 .actions button,.actions a{flex:0 1 auto}
+.actions a{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:var(--control);padding:9px 12px}
 .portal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 .portal-card,.item-card{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:12px;display:grid;gap:9px;min-width:0}
 .portal-card.active{border-color:color-mix(in srgb,var(--accent) 52%,var(--line));background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
@@ -57,8 +58,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 .item-meta{font-size:12px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;min-width:0}
 .empty{padding:16px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);background:var(--surface);text-align:center}
 .split{display:grid;grid-template-columns:1.25fr .75fr;gap:14px}
-.catalog-list{display:grid;gap:8px;max-height:430px;overflow:auto;padding-right:2px}
-.catalog-item{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:10px;display:grid;grid-template-columns:1fr auto;gap:9px;align-items:center}
+.catalog-actions{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:end}
 .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
 .status-cell{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--surface)}
 .status-label{font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:900}
@@ -76,9 +76,9 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
   .split{grid-template-columns:1fr}
   .tabs{position:sticky;top:75px;z-index:1}
   .portal-grid{grid-template-columns:1fr}
-  .catalog-item{grid-template-columns:1fr}
+  .catalog-actions{grid-template-columns:1fr}
   .hero-head{display:grid}
-  .actions{display:grid;grid-template-columns:1fr;gap:8px}
+  .actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px}
   .actions button,.actions a{width:100%;text-align:center}
 }
 </style>
@@ -144,10 +144,13 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 <label>Type<select id="catalogKind"></select></label>
 </div>
 <label>Search<input id="catalogSearch" placeholder="Filter toys"></label>
-<label>Collection Name<input name="name" id="catalogName" placeholder="Defaults to selected toy"></label>
-<input type="hidden" name="catalog_index" id="catalogIndex">
+<label>Toy<select name="catalog_index" id="catalogSelect"></select></label>
+<label>Nickname<input name="name" id="catalogName" placeholder="Defaults to selected toy"></label>
 <div class="meta" id="catalogCount"></div>
-<div id="catalogList" class="catalog-list"></div>
+<div class="catalog-actions">
+<div class="meta" id="catalogDefaultName"></div>
+<button class="primary" type="submit">Add to Collection</button>
+</div>
 </form>
 </div>
 
@@ -158,7 +161,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 <option value="skylanders">Skylanders</option>
 <option value="infinity">Disney Infinity</option>
 </select></label>
-<label>Collection Name<input name="name" required placeholder="Imported toy name"></label>
+<label>Nickname<input name="name" required placeholder="Imported toy name"></label>
 <label>Binary File<input name="file" type="file" required></label>
 <button class="primary" type="submit">Import</button>
 </form>
@@ -342,19 +345,18 @@ async function loadCatalog() {
 }
 
 function renderCatalog() {
-  $("catalogIndex").value = catalog[0] ? catalog[0].index : "";
+  const select = $("catalogSelect");
+  const selected = select.value;
+  select.innerHTML = catalog.map(item =>
+    `<option value="${item.index}">${escapeHtml(item.name)} (${escapeHtml(readableKind(item.kind))}, ${escapeHtml(item.series)})</option>`
+  ).join("");
+  if (catalog.some(item => String(item.index) === selected)) select.value = selected;
+  select.disabled = catalog.length === 0;
+  $("entityForm").querySelector("button[type=submit]").disabled = catalog.length === 0;
   $("catalogCount").textContent = catalog.length
     ? `${catalogTotal} matching toys${catalogTotal > catalog.length ? `; showing first ${catalog.length}` : ""}.`
     : "No matching catalog toys.";
-  $("catalogList").innerHTML = catalog.map(item =>
-    `<div class="catalog-item">` +
-    `<div>` +
-    `<div class="item-name">${escapeHtml(item.name)}</div>` +
-    `<div class="item-meta"><span>${escapeHtml(readableKind(item.kind))}</span><span>${escapeHtml(item.series)}</span></div>` +
-    `</div>` +
-    `<button type="button" class="primary" onclick="createFromCatalog(${item.index})">Add</button>` +
-    `</div>`
-  ).join("") || `<div class="empty">No matching catalog toys.</div>`;
+  updateCatalogNicknameHint();
 }
 
 function updateCatalogKindOptions() {
@@ -365,6 +367,26 @@ function updateCatalogKindOptions() {
     .map(([value, label]) => `<option value="${value}">${label}</option>`)
     .join("");
   if (options.some(([value]) => value === selected)) $("catalogKind").value = selected;
+}
+
+function selectedCatalogToy() {
+  const index = Number($("catalogSelect").value);
+  return catalog.find(item => item.index === index) || null;
+}
+
+function suggestedNickname(toy) {
+  if (!toy) return "";
+  const existing = (library.entities || []).filter(item =>
+    item.game === $("catalogGame").value &&
+    (Number(item.catalog_index) === Number(toy.index) || item.figure === toy.name || item.toy === toy.name)
+  ).length;
+  return existing ? `${toy.name} ${existing + 1}` : toy.name;
+}
+
+function updateCatalogNicknameHint() {
+  const name = suggestedNickname(selectedCatalogToy());
+  $("catalogName").placeholder = name || "Defaults to selected toy";
+  $("catalogDefaultName").textContent = name ? `Default nickname: ${name}` : "";
 }
 
 function renderLibrary() {
@@ -403,7 +425,7 @@ function renderEntities() {
       placeOrRemove +
       `<button onclick="cloneEntity(${item.id})">Clone</button>` +
       `<button onclick="renameRecord('entity',${item.id})">Rename</button>` +
-      `<button onclick="deleteRecord('entity',${item.id})">Delete</button>` +
+      `<button class="danger" onclick="deleteRecord('entity',${item.id})">Delete</button>` +
       `<a href="/api/entity/${item.id}.bin">Export</a>` +
       `</div></div>`;
   }).join("") || `<div class="empty">No ${displayMode(currentMode)} collection items.</div>`;
@@ -533,18 +555,17 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-async function createFromCatalog(index) {
-  const item = catalog.find(item => item.index === index);
+async function createFromCatalog() {
+  const item = selectedCatalogToy();
   if (!item) {
     say("Catalog toy is no longer available.");
     return;
   }
-  const defaultName = item.name;
-  const name = $("catalogName").value.trim() || defaultName;
+  const name = $("catalogName").value.trim() || suggestedNickname(item);
   try {
     say(await api("/api/entity/create-from-catalog", {
       method:"POST",
-      body:`game=${enc($("catalogGame").value)}&catalog_index=${index}&name=${enc(name)}`
+      body:`game=${enc($("catalogGame").value)}&catalog_index=${item.index}&name=${enc(name)}`
     }));
     $("catalogName").value = "";
     showTab("play");
@@ -563,12 +584,16 @@ $("catalogSearch").addEventListener("input", () => {
   clearTimeout(catalogTimer);
   catalogTimer = setTimeout(() => loadCatalog().catch(error => say(error.message)), 250);
 });
+$("catalogSelect").addEventListener("change", updateCatalogNicknameHint);
 $("collectionSearch").addEventListener("input", () => {
   clearTimeout(collectionTimer);
   collectionTimer = setTimeout(renderEntities, 120);
 });
 
-$("entityForm").addEventListener("submit", event => event.preventDefault());
+$("entityForm").addEventListener("submit", event => {
+  event.preventDefault();
+  createFromCatalog();
+});
 
 $("uploadEntityForm").addEventListener("submit", async event => {
   event.preventDefault();
