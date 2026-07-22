@@ -190,6 +190,7 @@ let catalogTimer = 0;
 let collectionTimer = 0;
 let currentMode = "skylanders";
 let activeTab = "play";
+let refreshing = false;
 const skylandersPortalSlotCount = 8;
 const catalogKinds = {
   skylanders: [
@@ -242,6 +243,7 @@ function showTab(tab) {
     $(`tab${capitalize(name)}`).classList.toggle("active", name === tab);
     $(`tabButton${capitalize(name)}`).classList.toggle("active", name === tab);
   }
+  if (tab === "add" && catalog.length === 0) loadCatalog().catch(error => say(error.message));
 }
 
 function capitalize(value) {
@@ -249,6 +251,8 @@ function capitalize(value) {
 }
 
 async function refreshAll() {
+  if (refreshing) return;
+  refreshing = true;
   try {
     const status = await api("/status");
     library = await api("/api/library");
@@ -257,18 +261,21 @@ async function refreshAll() {
   } catch (error) {
     $("subtitle").textContent = "Disconnected";
     $("status").innerHTML = `<span class="pill warn">Offline</span>`;
-    $("deviceSubtitle").textContent = "Disconnected";
     say(error.message);
     return;
+  } finally {
+    refreshing = false;
   }
 
-  try {
-    await loadCatalog();
-  } catch (error) {
-    catalog = [];
-    catalogTotal = 0;
-    renderCatalog();
-    say(`Catalog refresh failed: ${error.message}`);
+  if (activeTab === "add") {
+    try {
+      await loadCatalog();
+    } catch (error) {
+      catalog = [];
+      catalogTotal = 0;
+      renderCatalog();
+      say(`Catalog refresh failed: ${error.message}`);
+    }
   }
 }
 
@@ -430,7 +437,6 @@ function renderSlots() {
   const sortedEntities = [...entities].sort((left, right) => left.name.localeCompare(right.name));
   if (currentMode === "infinity") {
     const activeCount = infinityPortalSlots.filter(portal => activeSlots.some(item => Number(item.slot) === portal.slot)).length;
-    $("deviceSubtitle").textContent = activeCount ? `${activeCount} toy${activeCount === 1 ? "" : "s"} placed.` : `${deviceName()} is empty.`;
     $("slots").innerHTML = infinityPortalSlots.map(portal => {
       const active = activeSlots.find(item => Number(item.slot) === portal.slot);
       const entity = active && entities.find(item => item.id === active.entity_id);
@@ -444,9 +450,6 @@ function renderSlots() {
   }
 
   const visibleActiveSlots = activeSlots.filter(active => Number(active.slot) < skylandersPortalSlotCount);
-  $("deviceSubtitle").textContent = visibleActiveSlots.length
-    ? `${visibleActiveSlots.length} toy${visibleActiveSlots.length === 1 ? "" : "s"} placed.`
-    : `${deviceName()} is empty.`;
   const activeCards = [...visibleActiveSlots]
     .sort((left, right) => Number(left.slot) - Number(right.slot))
     .map(active => {
