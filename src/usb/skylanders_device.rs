@@ -250,9 +250,12 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     }
 
     fn queue_status_reports(&mut self, count: usize) {
+        self.drop_queued_status_reports();
         for _ in 0..count {
             let report = self.state.next_status_report();
-            self.push_report(report);
+            if !self.push_report_if_space(report) {
+                break;
+            }
         }
     }
 
@@ -318,14 +321,33 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     }
 
     fn push_report(&mut self, report: skylanders::Report) {
+        if self.push_report_if_space(report) {
+            return;
+        }
+        println!("Skylanders USB response queue full; dropping newest queued response");
+        self.queue[REPORT_QUEUE_LEN - 1] = Some(report);
+    }
+
+    fn push_report_if_space(&mut self, report: skylanders::Report) -> bool {
         for slot in &mut self.queue {
             if slot.is_none() {
                 *slot = Some(report);
-                return;
+                return true;
             }
         }
-        println!("Skylanders USB response queue full; dropping oldest response");
-        self.queue[REPORT_QUEUE_LEN - 1] = Some(report);
+        false
+    }
+
+    fn drop_queued_status_reports(&mut self) {
+        let mut compacted = [None; REPORT_QUEUE_LEN];
+        let mut next = 0;
+        for report in self.queue.iter().flatten().copied() {
+            if report[0] != b'S' {
+                compacted[next] = Some(report);
+                next += 1;
+            }
+        }
+        self.queue = compacted;
     }
 
     fn push_report_front(&mut self, report: skylanders::Report) {
