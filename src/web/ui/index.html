@@ -10,7 +10,7 @@
 html,body{max-width:100%;overflow-x:hidden}
 body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 main{max-width:1040px;margin:0 auto;padding:14px}
-header{position:sticky;top:0;z-index:2;margin:-14px -14px 14px;padding:14px;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--soft-line)}
+header{position:sticky;top:0;z-index:2;padding:14px;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--soft-line)}
 .topbar{max-width:1040px;margin:0 auto;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
 h1{font-size:25px;line-height:1.05;margin:0}
 h2{font-size:18px;margin:0}
@@ -22,7 +22,7 @@ button.primary{background:var(--accent-fill);border-color:var(--accent-fill);col
 button.danger{background:var(--danger-fill);border-color:var(--danger-fill);color:#fff}
 button.ghost{background:transparent}
 input,select{width:100%;padding:10px 11px}
-label{display:grid;gap:5px;font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase}
+label{display:grid;gap:5px;font-size:12px;margin:8px 0;font-weight:800;color:var(--muted);text-transform:uppercase}
 a{color:var(--accent);font-weight:800;text-decoration:none}
 .mode-pill{justify-self:end;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .mode-pill select{width:auto;min-width:165px}
@@ -58,7 +58,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 .item-meta{font-size:12px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;min-width:0}
 .empty{padding:16px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);background:var(--surface);text-align:center}
 .split{display:grid;grid-template-columns:1.25fr .75fr;gap:14px}
-.catalog-actions{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:end}
+.catalog-actions{display:grid;grid-template-columns:1fr auto;align-items:end}
 .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
 .status-cell{border:1px solid var(--line);border-radius:8px;padding:10px;background:var(--surface)}
 .status-label{font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:900}
@@ -66,7 +66,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 #message{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:var(--log-bg);color:var(--log-text);padding:11px;border-radius:8px;min-height:74px;max-height:190px;overflow:auto}
 @media(max-width:760px){
   main{padding:10px}
-  header{margin:-10px -10px 12px;padding:12px 16px}
+  header{padding:12px}
   .topbar{grid-template-columns:1fr}
   .mode-pill{display:grid;grid-template-columns:1fr 1fr;justify-self:stretch}
   .mode-pill select{grid-column:1/-1;width:100%;min-width:0}
@@ -77,7 +77,6 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
   .tabs{position:sticky;top:75px;z-index:1}
   .portal-grid{grid-template-columns:1fr}
   .catalog-actions{grid-template-columns:1fr}
-  .hero-head{display:grid}
   .actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:8px}
   .actions button,.actions a{width:100%;text-align:center}
 }
@@ -110,10 +109,7 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 <section id="tabPlay" class="tab active">
 <div class="panel hero">
 <div class="hero-head">
-<div class="hero-title">
-<h2 id="deviceHeading">On Device</h2>
-<div class="subtitle" id="deviceSubtitle">Ready.</div>
-</div>
+<h2 id="deviceHeading">Device</h2>
 <button id="clearDeviceButton" onclick="clearActive()">Clear</button>
 </div>
 <div id="slots" class="portal-grid"></div>
@@ -145,10 +141,9 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 </div>
 <label>Search<input id="catalogSearch" placeholder="Filter toys"></label>
 <label>Toy<select name="catalog_index" id="catalogSelect"></select></label>
-<label>Nickname<input name="name" id="catalogName" placeholder="Defaults to selected toy"></label>
 <div class="meta" id="catalogCount"></div>
+<label>Nickname<input name="name" id="catalogName" placeholder="Defaults to selected toy"></label>
 <div class="catalog-actions">
-<div class="meta" id="catalogDefaultName"></div>
 <button class="primary" type="submit">Add to Collection</button>
 </div>
 </form>
@@ -312,8 +307,7 @@ function displayMode(mode) {
 }
 
 function renderDeviceLabels() {
-  $("deviceHeading").textContent = `On ${deviceName()}`;
-  $("clearDeviceButton").textContent = `Clear ${deviceName()}`;
+  $("deviceHeading").textContent = deviceName();
   $("collectionScope").textContent = displayMode(currentMode);
 }
 
@@ -386,7 +380,6 @@ function suggestedNickname(toy) {
 function updateCatalogNicknameHint() {
   const name = suggestedNickname(selectedCatalogToy());
   $("catalogName").placeholder = name || "Defaults to selected toy";
-  $("catalogDefaultName").textContent = name ? `Default nickname: ${name}` : "";
 }
 
 function renderLibrary() {
@@ -415,7 +408,7 @@ function renderEntities() {
   const activeSlots = activeSlotsForCurrentMode();
   $("entities").innerHTML = entities.map(item => {
     const slots = activeSlots.filter(slot => slot.entity_id === item.id).map(slot => Number(slot.slot));
-    const active = slots.length ? `<span class="pill ok">On ${deviceName()}</span>` : "";
+    const active = slots.length ? `<span class="pill ok">Active</span>` : "";
     const placeOrRemove = slots.length
       ? slots.map(slot => `<button onclick="removeSlot(${slot})">Remove</button>`).join("")
       : `<button class="primary" onclick="placeEntityFirstAvailable(${item.id})">Place</button>`;
@@ -425,8 +418,8 @@ function renderEntities() {
       placeOrRemove +
       `<button onclick="cloneEntity(${item.id})">Clone</button>` +
       `<button onclick="renameRecord('entity',${item.id})">Rename</button>` +
-      `<button class="danger" onclick="deleteRecord('entity',${item.id})">Delete</button>` +
       `<a href="/api/entity/${item.id}.bin">Export</a>` +
+      `<button class="danger" onclick="deleteRecord('entity',${item.id})">Delete</button>` +
       `</div></div>`;
   }).join("") || `<div class="empty">No ${displayMode(currentMode)} collection items.</div>`;
 }
