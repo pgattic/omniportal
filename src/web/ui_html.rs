@@ -5,38 +5,70 @@ pub const INDEX_HTML: &str = r#"<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OmniPortal</title>
 <style>
-body{font-family:system-ui,sans-serif;margin:0;background:#f5f5f5;color:#1c1c1c}
-main{max-width:880px;margin:0 auto;padding:16px}
-h1{font-size:24px;margin:0 0 12px}
-h2{font-size:18px;margin:0 0 10px}
-section{background:#fff;border:1px solid #d8d8d8;border-radius:6px;margin:12px 0;padding:12px}
-form{display:grid;gap:8px;margin:8px 0}
-label{display:grid;gap:4px;font-size:13px}
-input,select,button{font:inherit;padding:8px;border:1px solid #bbb;border-radius:4px;background:#fff}
-input,select{box-sizing:border-box;min-width:0;max-width:100%}
-label>input,label>select{width:100%}
-button{background:#ececec}
-button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.row>*{flex:1 1 160px}
+:root{color-scheme:light dark;--bg:light-dark(#f4f6f8,#101418);--panel:light-dark(#fff,#171d23);--surface:light-dark(#fbfcfd,#1d242b);--field:light-dark(#fff,#121820);--line:light-dark(#d7dde3,#343e49);--control-line:light-dark(#aeb8c2,#4a5562);--muted:light-dark(#5b6672,#a3adb8);--text:light-dark(#16202a,#edf2f7);--control:light-dark(#eef2f6,#222a33);--accent:light-dark(#1267b3,#65a9ee);--accent-fill:light-dark(#1267b3,#1f6feb);--danger:light-dark(#b42318,#e05243);--danger-fill:light-dark(#b42318,#8f241c);--ok:light-dark(#0d7a4f,#6fd0a4);--ok-line:light-dark(#9fd8c2,#27644e);--ok-bg:light-dark(#eefaf5,#12251e);--warn:light-dark(#8a4b00,#f0bd63);--warn-line:light-dark(#e5c183,#735222);--warn-bg:light-dark(#fff7e8,#2a2114);--log-bg:light-dark(#101820,#05080c);--log-text:light-dark(#f4f8fb,#dce7f2)}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:var(--bg);color:var(--text)}
+main{max-width:960px;margin:0 auto;padding:14px}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin:4px 0 14px}
+h1{font-size:24px;line-height:1.1;margin:0}
+h2{font-size:17px;margin:0}
+section{background:var(--panel);border:1px solid var(--line);border-radius:6px;margin:12px 0;padding:12px}
+section>h2{margin-bottom:10px}
+form{display:grid;gap:10px;margin:0}
+label{display:grid;gap:5px;font-size:13px;font-weight:600;color:var(--text)}
+input,select,button{font:inherit;min-width:0;max-width:100%;padding:9px 10px;border:1px solid var(--control-line);border-radius:4px;background:var(--field);color:var(--text)}
+input,select{width:100%}
+button{background:var(--control);cursor:pointer;white-space:nowrap}
+button:disabled{cursor:not-allowed;opacity:.55}
+button.primary{background:var(--accent-fill);color:#fff;border-color:var(--accent-fill)}
+button.danger{color:#fff;background:var(--danger-fill);border-color:var(--danger-fill)}
+a{color:var(--accent);font-weight:600;text-decoration:none}
+.toolbar,.row,.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.toolbar{justify-content:flex-end}
+.row>*{flex:1 1 180px}
+.actions{margin-top:8px}
+.actions button,.actions a{flex:0 1 auto}
+.actions select{width:auto;min-width:150px;flex:1 1 180px}
+.status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px}
+.status-cell{border:1px solid var(--line);border-radius:4px;padding:8px;background:var(--surface)}
+.status-label{font-size:11px;text-transform:uppercase;color:var(--muted);font-weight:700}
+.status-value{margin-top:3px;font-weight:700;word-break:break-word}
+.pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700;background:var(--field)}
+.pill.ok{color:var(--ok);border-color:var(--ok-line);background:var(--ok-bg)}
+.pill.warn{color:var(--warn);border-color:var(--warn-line);background:var(--warn-bg)}
 .list{display:grid;gap:8px}
-.item{border:1px solid #ddd;border-radius:4px;padding:8px;background:#fafafa}
-.item strong{display:block}
-.meta{font-size:12px;color:#555;word-break:break-word}
-.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.actions select{width:auto;min-width:120px;max-width:100%}
-.slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}
-.slot{border:1px solid #ddd;border-radius:4px;padding:8px;background:#fafafa;display:grid;gap:8px}
-.slot.empty{background:#fff}
-.slot-title{font-weight:700}
+.item{border:1px solid var(--line);border-radius:6px;padding:10px;background:var(--surface)}
+.item-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.item strong{display:block;min-width:0;overflow-wrap:anywhere}
+.meta{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
+.slot{border:1px solid var(--line);border-radius:6px;padding:10px;background:var(--surface);display:grid;gap:8px;min-width:0}
+.slot.empty{background:var(--panel)}
+.slot-title{font-weight:800;overflow-wrap:anywhere}
 .portal-add{align-content:start}
-.portal-add button{font-size:20px;line-height:1;padding:8px 12px}
-#message{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px;background:#111;color:#eee;padding:8px;border-radius:4px}
+.portal-add button{font-size:20px;line-height:1;padding:8px 13px}
+#message{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:var(--log-bg);color:var(--log-text);padding:10px;border-radius:4px;min-height:42px;overflow:auto}
+@media(max-width:560px){
+  main{padding:10px}
+  header{display:grid}
+  .toolbar,.actions{align-items:stretch}
+  .toolbar button,.actions button,.actions a{flex:1 1 auto;text-align:center}
+  .row{display:grid}
+  .slots{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
 <main>
+<header>
+<div>
 <h1>OmniPortal</h1>
+<div class="meta" id="subtitle">Loading device state...</div>
+</div>
+<div class="toolbar">
+<button onclick="refreshAll()">Refresh</button>
+</div>
+</header>
 
 <section>
 <h2>Status</h2>
@@ -46,8 +78,7 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <option value="skylanders">Skylanders</option>
 <option value="infinity">Disney Infinity</option>
 </select></label>
-<button onclick="switchMode()">Switch Mode</button>
-<button onclick="refreshAll()">Refresh</button>
+<button onclick="switchMode()">Save Mode</button>
 <button onclick="compactStorage()">Compact Storage</button>
 </div>
 </section>
@@ -68,22 +99,12 @@ button.primary{background:#1f6feb;color:#fff;border-color:#1f6feb}
 <option value="skylanders">Skylanders</option>
 <option value="infinity">Disney Infinity</option>
 </select></label>
-<label>Type<select id="catalogKind">
-<option value="">All types</option>
-<option value="character">Characters</option>
-<option value="item">Items</option>
-<option value="level-piece">Level pieces</option>
-<option value="trap">Traps</option>
-<option value="vehicle">Vehicles</option>
-<option value="creation-crystal">Creation crystals</option>
-<option value="trophy">Trophies</option>
-<option value="power-disc">Power discs</option>
-</select></label>
+<label>Type<select id="catalogKind"></select></label>
 <label>Search<input id="catalogSearch" placeholder="Filter catalog"></label>
 </div>
 <label>Catalog Item<select name="catalog_index" id="catalogSelect"></select></label>
 <label>Collection Name<input name="name" required placeholder="Name"></label>
-<button class="primary" type="submit">Add Entity</button>
+<button class="primary" type="submit">Add to Collection</button>
 <div class="meta" id="catalogCount"></div>
 </form>
 </section>
@@ -119,6 +140,25 @@ let catalogTotal = 0;
 let catalogTimer = 0;
 let currentMode = "skylanders";
 const skylandersPortalSlotCount = 8;
+const catalogKinds = {
+  skylanders: [
+    ["", "All types"],
+    ["character", "Characters"],
+    ["item", "Magic items"],
+    ["level-piece", "Level pieces"],
+    ["trap", "Traps"],
+    ["vehicle", "Vehicles"],
+    ["creation-crystal", "Creation crystals"],
+    ["trophy", "Trophies"]
+  ],
+  infinity: [
+    ["", "All types"],
+    ["character", "Characters"],
+    ["power-disc", "Power discs"],
+    ["play-set", "Play sets"],
+    ["unknown", "Other"]
+  ]
+};
 const infinityPortalSlots = [
   {slot: 0, label: "Player 1", accepts: item => item.game === "infinity" && (item.kind === "character" || item.kind === "unknown")},
   {slot: 1, label: "Player 2", accepts: item => item.game === "infinity" && (item.kind === "character" || item.kind === "unknown")},
@@ -130,22 +170,46 @@ const enc = value => encodeURIComponent(value == null ? "" : value);
 const qs = form => new URLSearchParams(new FormData(form)).toString();
 
 async function api(path, options) {
-  const res = await fetch(path, options);
+  let res;
+  try {
+    res = await fetch(path, options);
+  } catch (_) {
+    throw new Error("Device did not respond. Check that you are connected to the OmniPortal WiFi network.");
+  }
   const text = await res.text();
-  if (!res.ok) throw new Error(text || res.statusText);
+  if (!res.ok) throw new Error(text.trim() || res.statusText);
   try { return JSON.parse(text); } catch (_) { return text; }
 }
 
 function say(value) {
-  $("message").textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  if (typeof value === "string") {
+    $("message").textContent = value;
+  } else {
+    $("message").textContent = JSON.stringify(value, null, 2);
+  }
 }
 
 async function refreshAll() {
-  const status = await api("/status");
-  library = await api("/api/library");
-  renderStatus(status);
-  renderLibrary();
-  await loadCatalog();
+  try {
+    const status = await api("/status");
+    library = await api("/api/library");
+    renderStatus(status);
+    renderLibrary();
+  } catch (error) {
+    $("subtitle").textContent = "Disconnected";
+    $("status").innerHTML = `<span class="pill warn">Offline</span>`;
+    say(error.message);
+    return;
+  }
+
+  try {
+    await loadCatalog();
+  } catch (error) {
+    catalog = [];
+    catalogTotal = 0;
+    renderCatalog();
+    say(`Catalog refresh failed: ${error.message}`);
+  }
 }
 
 function renderStatus(status) {
@@ -156,12 +220,15 @@ function renderStatus(status) {
   const slots = status.active_slots || [];
   const used = storage.used_bytes || 0;
   const capacity = storage.capacity_bytes || 0;
+  $("subtitle").textContent = `${deviceName()} mode`;
   $("status").innerHTML =
-    `<div>Mode: ${status.mode || "unknown"}</div>` +
-    `<div>${activeItemLabel(true)} on ${deviceName()}: ${slots.length}</div>` +
-    `<div>Records: ${storage.entities || 0} entities</div>` +
-    `<div>Storage: ${used} / ${capacity} bytes (${storagePercent(used, capacity)})</div>` +
-    `<div>Corrupt records: ${storage.corrupt_records || 0}</div>`;
+    `<div class="status-grid">` +
+    statusCell("Mode", displayMode(status.mode)) +
+    statusCell(`${activeItemLabel(true)} on ${deviceName()}`, slots.length) +
+    statusCell("Collection", `${storage.entities || 0} entities`) +
+    statusCell("Storage", `${used} / ${capacity} bytes (${storagePercent(used, capacity)})`) +
+    statusCell("Integrity", storage.corrupt_records ? `${storage.corrupt_records} corrupt` : "OK") +
+    `</div>`;
 }
 
 function deviceName(mode = currentMode) {
@@ -178,17 +245,32 @@ function renderDeviceLabels() {
   $("clearDeviceButton").textContent = `Clear ${deviceName()}`;
 }
 
+function displayMode(mode) {
+  if (mode === "infinity") return "Disney Infinity";
+  if (mode === "skylanders") return "Skylanders";
+  return mode || "Unknown";
+}
+
+function statusCell(label, value) {
+  return `<div class="status-cell"><div class="status-label">${escapeHtml(label)}</div><div class="status-value">${escapeHtml(value)}</div></div>`;
+}
+
 async function switchMode() {
   const mode = $("modeSelect").value;
-  const result = await api("/api/mode/set", {method:"POST", body:`mode=${enc(mode)}`});
-  if (result.reenumerating) {
-    say(`${result.mode} mode saved. Reset the console game if it does not notice the device.`);
-  } else {
-    say(`${result.mode} mode is already active.`);
+  try {
+    const result = await api("/api/mode/set", {method:"POST", body:`mode=${enc(mode)}`});
+    if (result.reenumerating) {
+      say(`${displayMode(result.mode)} mode saved. Restart the console game if it does not notice the device.`);
+    } else {
+      say(`${displayMode(result.mode)} mode is already active.`);
+    }
+    $("catalogGame").value = result.mode;
+    $("uploadEntityForm").elements.game.value = result.mode;
+    updateCatalogKindOptions();
+    await refreshAll();
+  } catch (error) {
+    say(error.message);
   }
-  $("catalogGame").value = result.mode;
-  $("uploadEntityForm").elements.game.value = result.mode;
-  await refreshAll();
 }
 
 async function loadCatalog() {
@@ -210,7 +292,21 @@ function renderCatalog() {
     option.textContent = `${item.name} (${item.kind}, ${item.series})`;
     select.appendChild(option);
   }
-  $("catalogCount").textContent = `${catalogTotal} matching entries${catalogTotal > catalog.length ? `; showing first ${catalog.length}` : ""}.`;
+  select.disabled = catalog.length === 0;
+  $("entityForm").querySelector("button[type=submit]").disabled = catalog.length === 0;
+  $("catalogCount").textContent = catalog.length
+    ? `${catalogTotal} matching entries${catalogTotal > catalog.length ? `; showing first ${catalog.length}` : ""}.`
+    : "No matching catalog entries.";
+}
+
+function updateCatalogKindOptions() {
+  const game = $("catalogGame").value;
+  const selected = $("catalogKind").value;
+  const options = catalogKinds[game] || catalogKinds.skylanders;
+  $("catalogKind").innerHTML = options
+    .map(([value, label]) => `<option value="${value}">${label}</option>`)
+    .join("");
+  if (options.some(([value]) => value === selected)) $("catalogKind").value = selected;
 }
 
 function renderLibrary() {
@@ -219,7 +315,7 @@ function renderLibrary() {
 }
 
 function itemShell(title, meta, actions) {
-  return `<div class="item"><strong>${title}</strong><div class="meta">${meta}</div><div class="actions">${actions}</div></div>`;
+  return `<div class="item"><div class="item-head"><strong>${title}</strong></div><div class="meta">${meta}</div><div class="actions">${actions}</div></div>`;
 }
 
 function renderEntities() {
@@ -229,7 +325,7 @@ function renderEntities() {
     const slots = activeSlots
       .filter(slot => slot.entity_id === item.id)
       .map(slot => Number(slot.slot) + 1);
-    const active = slots.length ? " (active)" : "";
+    const active = slots.length ? ` <span class="pill ok">Active</span>` : "";
     const download = `<a href="/api/entity/${item.id}.bin">Export</a>`;
     const clone = `<button onclick="cloneEntity(${item.id})">Clone</button>`;
     const place_remove = slots.length
@@ -304,6 +400,7 @@ function renderSlots() {
 }
 
 function entityOptions(entities, selectedId) {
+  if (!entities.length) return "";
   return entities.map(item => {
     const selected = item.id === selectedId ? " selected" : "";
     return `<option value="${item.id}"${selected}>#${item.id} ${escapeHtml(item.name)}</option>`;
@@ -332,7 +429,14 @@ function firstAvailableSlotForEntity(entity) {
 
 function entityMeta(item) {
   const figure = item.figure || `ID ${item.character_id}`;
-  return `${escapeHtml(figure)}, ${item.kind}, ${item.game}`;
+  const mode = item.game === "infinity" ? "Disney Infinity" : "Skylanders";
+  const details = [figure, readableKind(item.kind), mode];
+  if (item.image_len) details.push(`${item.image_len} bytes`);
+  return details.map(escapeHtml).join(" / ");
+}
+
+function readableKind(kind) {
+  return String(kind || "unknown").replace(/-/g, " ");
 }
 
 function storagePercent(used, capacity) {
@@ -356,7 +460,10 @@ function escapeHtml(value) {
 }
 
 $("catalogKind").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
-$("catalogGame").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
+$("catalogGame").addEventListener("change", () => {
+  updateCatalogKindOptions();
+  loadCatalog().catch(error => say(error.message));
+});
 $("catalogSearch").addEventListener("input", () => {
   clearTimeout(catalogTimer);
   catalogTimer = setTimeout(() => loadCatalog().catch(error => say(error.message)), 250);
@@ -454,7 +561,8 @@ async function deleteRecord(kind, id) {
   if (confirm(`Delete ${kind} #${id}?`)) await post(`/api/${kind}/delete`, `id=${id}`);
 }
 
-refreshAll().catch(error => say(error.message));
+updateCatalogKindOptions();
+refreshAll();
 </script>
 </body>
 </html>
