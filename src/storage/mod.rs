@@ -97,19 +97,18 @@ pub fn init() {
     let mut flash = StorageFlash::new();
     let mut catalog = Catalog::new();
     let scan = scan_flash(&mut flash, &mut catalog);
-    if scan.is_err() {
+    let scan_ok = scan.is_ok();
+    if !scan_ok {
         catalog.needs_format = true;
     }
     catalog.clear_transient_active_slots();
-    #[cfg(not(target_arch = "xtensa"))]
-    let _ = scan;
     #[cfg(target_arch = "xtensa")]
     println!(
         "Storage scan: identities={}, entities={}, used={} bytes, status={}",
         catalog.identity_count(),
         catalog.entity_count(),
         catalog.write_offset,
-        if scan.is_ok() { "ok" } else { "needs-format" }
+        if scan_ok { "ok" } else { "needs-format" }
     );
 
     critical_section::with(|cs| {
@@ -857,8 +856,7 @@ fn compact_store(store: &mut Store) -> Result<(), StorageError> {
         generation += 1;
     }
 
-    for identity in identities.iter().flatten().copied() {
-        let mut identity = identity;
+    for mut identity in identities.iter().flatten().copied() {
         identity.generation = generation;
         append_record(
             &mut store.flash,
@@ -872,8 +870,7 @@ fn compact_store(store: &mut Store) -> Result<(), StorageError> {
         generation += 1;
     }
 
-    for entity in entities.iter().flatten().copied() {
-        let mut entity = entity;
+    for mut entity in entities.iter().flatten().copied() {
         entity.updated_generation = generation;
         append_record(
             &mut store.flash,

@@ -100,9 +100,9 @@ a{color:var(--accent);font-weight:600;text-decoration:none}
 <option value="infinity">Disney Infinity</option>
 </select></label>
 <label>Type<select id="catalogKind"></select></label>
-<label>Search<input id="catalogSearch" placeholder="Filter catalog"></label>
+<label>Search<input id="catalogSearch" placeholder="Filter toys"></label>
 </div>
-<label>Catalog Item<select name="catalog_index" id="catalogSelect"></select></label>
+<label>Catalog Toy<select name="catalog_index" id="catalogSelect"></select></label>
 <label>Collection Name<input name="name" required placeholder="Name"></label>
 <button class="primary" type="submit">Add to Collection</button>
 <div class="meta" id="catalogCount"></div>
@@ -236,8 +236,7 @@ function deviceName(mode = currentMode) {
 }
 
 function activeItemLabel(plural = false, mode = currentMode) {
-  if (mode === "infinity") return plural ? "Toys" : "Toy";
-  return plural ? "Figures" : "Figure";
+  return plural ? "Toys" : "Toy";
 }
 
 function renderDeviceLabels() {
@@ -278,7 +277,7 @@ async function loadCatalog() {
   const kind = $("catalogKind").value;
   const search = $("catalogSearch").value.trim();
   const loaded = await api(`/api/catalog?game=${enc(game)}&kind=${enc(kind)}&q=${enc(search)}&limit=30`);
-  catalog = loaded.figures || [];
+  catalog = loaded.toys || [];
   catalogTotal = loaded.total || catalog.length;
   renderCatalog();
 }
@@ -295,8 +294,8 @@ function renderCatalog() {
   select.disabled = catalog.length === 0;
   $("entityForm").querySelector("button[type=submit]").disabled = catalog.length === 0;
   $("catalogCount").textContent = catalog.length
-    ? `${catalogTotal} matching entries${catalogTotal > catalog.length ? `; showing first ${catalog.length}` : ""}.`
-    : "No matching catalog entries.";
+    ? `${catalogTotal} matching toys${catalogTotal > catalog.length ? `; showing first ${catalog.length}` : ""}.`
+    : "No matching catalog toys.";
 }
 
 function updateCatalogKindOptions() {
@@ -389,9 +388,9 @@ function renderSlots() {
     .join("");
   const availableEntities = sortedEntities.filter(item => item.game === "skylanders" && !activeSlots.some(active => active.entity_id === item.id));
   const addCard = firstEmptySlot(activeSlots) == null
-    ? `<div class="slot empty"><div class="slot-title">${deviceName()} Full</div><div class="meta">Remove a figure before adding another.</div></div>`
+    ? `<div class="slot empty"><div class="slot-title">${deviceName()} Full</div><div class="meta">Remove a toy before adding another.</div></div>`
     : `<div class="slot empty portal-add">` +
-      `<div class="slot-title">Add Figure</div>` +
+      `<div class="slot-title">Add Toy</div>` +
       `<div class="actions">` +
       `<select id="portalAddSelect">${entityOptions(availableEntities, null)}</select>` +
       `<button title="Place on ${deviceName()}" onclick="placePortalAddSelect()" ${availableEntities.length ? "" : "disabled"}>+</button>` +
@@ -428,9 +427,9 @@ function firstAvailableSlotForEntity(entity) {
 }
 
 function entityMeta(item) {
-  const figure = item.figure || `ID ${item.character_id}`;
+  const toy = item.figure || `ID ${item.character_id}`;
   const mode = item.game === "infinity" ? "Disney Infinity" : "Skylanders";
-  const details = [figure, readableKind(item.kind), mode];
+  const details = [toy, readableKind(item.kind), mode];
   if (item.image_len) details.push(`${item.image_len} bytes`);
   return details.map(escapeHtml).join(" / ");
 }

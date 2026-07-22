@@ -124,7 +124,7 @@ curl -X POST 'http://192.168.4.1/api/storage/compact'
 Raw upload endpoints take query-string metadata and a binary request body:
 
 ```sh
-curl -X POST --data-binary @figure.bin 'http://192.168.4.1/api/entity/upload?name=Imported+Figure'
+curl -X POST --data-binary @toy.bin 'http://192.168.4.1/api/entity/upload?name=Imported+Toy'
 ```
 
 Delete endpoints use POST as well:

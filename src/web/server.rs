@@ -195,11 +195,10 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
             }
         }
 
-        let body = format!(
-            "{{\"game\":\"infinity\",\"offset\":{},\"limit\":{},\"total\":{},\"figures\":[",
+        let mut body = format!(
+            "{{\"game\":\"infinity\",\"offset\":{},\"limit\":{},\"total\":{},\"toys\":[",
             offset, limit, total
         );
-        let mut body = body;
         let mut emitted = 0usize;
         let mut seen = 0usize;
         for entry in crate::figures::infinity::INFINITY_CATALOG {
@@ -237,7 +236,7 @@ async fn write_catalog(socket: &mut TcpSocket<'_>, query: &str) {
     }
 
     let mut body = format!(
-        "{{\"game\":\"skylanders\",\"offset\":{},\"limit\":{},\"total\":{},\"figures\":[",
+        "{{\"game\":\"skylanders\",\"offset\":{},\"limit\":{},\"total\":{},\"toys\":[",
         offset, limit, total
     );
     let mut emitted = 0usize;
