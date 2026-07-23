@@ -190,6 +190,34 @@ fn new_mutable_entity_images_include_encrypted_fresh_save_data() {
 }
 
 #[test]
+fn skylanders_character_like_subtypes_initialize_like_characters() {
+    for kind in [
+        FigureKind::Giant,
+        FigureKind::Swapper,
+        FigureKind::TrapMaster,
+        FigureKind::Mini,
+        FigureKind::CreationCrystal,
+    ] {
+        let image = initialize_new_entity_image(kind, 21, None, 1);
+        let plaintext = decrypt_figure(&image);
+
+        assert_ne!(image, plaintext);
+        assert_eq!(&plaintext[0x80 + 0x5a..0x80 + 0x5c], &1u16.to_le_bytes());
+    }
+}
+
+#[test]
+fn skylanders_unknown_layout_toys_keep_plain_dolphin_create_layout() {
+    for kind in [FigureKind::Trap, FigureKind::Vehicle] {
+        let image = initialize_new_entity_image(kind, 214, Some(0x3001), 1);
+
+        assert_eq!(decrypt_figure(&image), image);
+        assert_eq!(&image[0x10..0x12], &214u16.to_le_bytes());
+        assert_eq!(&image[0x1c..0x1e], &0x3001u16.to_le_bytes());
+    }
+}
+
+#[test]
 fn new_static_entity_images_keep_dolphin_create_layout_without_save_blob() {
     let image = initialize_new_entity_image(FigureKind::Item, 230, None, 1);
 

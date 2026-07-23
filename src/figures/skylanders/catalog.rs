@@ -66,11 +66,15 @@ impl FigureCatalogEntry {
     }
 
     pub const fn element(self) -> SkylandersElement {
-        skylanders_element_for_character_id(self.character_id)
+        skylanders_element_for_entry(self.character_id, self.variant_id)
     }
 }
 
 pub const fn skylanders_element_for_character_id(character_id: u32) -> SkylandersElement {
+    skylanders_element_for_entry(character_id, 0)
+}
+
+pub const fn skylanders_element_for_entry(character_id: u32, variant_id: u32) -> SkylandersElement {
     match character_id {
         0..=3 => SkylandersElement::Air,
         4..=7 => SkylandersElement::Earth,
@@ -162,9 +166,25 @@ pub const fn skylanders_element_for_character_id(character_id: u32) -> Skylander
         3412 | 3421 | 3424 => SkylandersElement::Fire,
         3415 | 3423 | 3428 => SkylandersElement::Life,
         3422 | 3425 => SkylandersElement::Water,
-        3426 => SkylandersElement::Light,
+        3426 if variant_id == 0x4503 => SkylandersElement::Light,
+        3426 => SkylandersElement::Tech,
         3427 => SkylandersElement::Dark,
         _ => SkylandersElement::Unknown,
+    }
+}
+
+pub const fn skylanders_kind_for_entry(base_kind: FigureKind, character_id: u32) -> FigureKind {
+    match base_kind {
+        FigureKind::Character => match character_id {
+            101 | 102 | 104 | 107 | 109 | 110 | 112 | 114 => FigureKind::Giant,
+            450 | 451 | 454 | 455 | 458 | 459 | 462 | 463 | 466 | 467 | 470 | 471 | 474 | 475
+            | 478 | 479 | 482 | 484 => FigureKind::TrapMaster,
+            502 | 503 | 504 | 505 | 506 | 507 | 508 | 509 | 510 | 511 | 514 | 519 | 526 | 540
+            | 541 | 542 | 543 => FigureKind::Mini,
+            1000..=1015 | 2000..=2015 => FigureKind::Swapper,
+            _ => FigureKind::Character,
+        },
+        other => other,
     }
 }
 
@@ -173,7 +193,7 @@ macro_rules! entry {
         FigureCatalogEntry {
             index: $index,
             game_line: GameLine::Skylanders,
-            kind: FigureKind::$kind,
+            kind: skylanders_kind_for_entry(FigureKind::$kind, $char_id),
             series: $series,
             name: $name,
             character_id: $char_id,
@@ -905,8 +925,19 @@ mod tests {
         assert_eq!(SKYLANDERS_CATALOG[57].element(), SkylandersElement::Magic);
         assert_eq!(SKYLANDERS_CATALOG[67].name, "Trigger Happy");
         assert_eq!(SKYLANDERS_CATALOG[67].element(), SkylandersElement::Tech);
+        assert_eq!(SKYLANDERS_CATALOG[121].name, "Swarm");
+        assert_eq!(SKYLANDERS_CATALOG[121].kind, FigureKind::Giant);
         assert_eq!(SKYLANDERS_CATALOG[315].name, "Knight Light");
+        assert_eq!(SKYLANDERS_CATALOG[315].kind, FigureKind::TrapMaster);
         assert_eq!(SKYLANDERS_CATALOG[315].element(), SkylandersElement::Light);
+        assert_eq!(SKYLANDERS_CATALOG[438].name, "Jet");
+        assert_eq!(SKYLANDERS_CATALOG[438].kind, FigureKind::Swapper);
+        assert_eq!(SKYLANDERS_CATALOG[320].name, "Spry");
+        assert_eq!(SKYLANDERS_CATALOG[320].kind, FigureKind::Mini);
+        assert_eq!(SKYLANDERS_CATALOG[620].name, "Astroblast");
+        assert_eq!(SKYLANDERS_CATALOG[620].element(), SkylandersElement::Tech);
+        assert_eq!(SKYLANDERS_CATALOG[621].name, "Legendary Astroblast");
+        assert_eq!(SKYLANDERS_CATALOG[621].element(), SkylandersElement::Light);
         assert!(SKYLANDERS_CATALOG
             .iter()
             .any(|entry| entry.kind == FigureKind::Vehicle));

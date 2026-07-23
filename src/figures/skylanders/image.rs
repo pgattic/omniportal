@@ -141,12 +141,18 @@ fn compute_checksum_type0(image: &mut [u8; SKYLANDERS_IMAGE_BYTES]) {
 fn initialize_default_save_data(image: &mut [u8; SKYLANDERS_IMAGE_BYTES], kind: FigureKind) {
     match kind {
         FigureKind::Character
-        | FigureKind::Trap
-        | FigureKind::CreationCrystal
-        | FigureKind::Vehicle => initialize_character_save_data(image),
+        | FigureKind::Giant
+        | FigureKind::Swapper
+        | FigureKind::TrapMaster
+        | FigureKind::Mini
+        | FigureKind::CreationCrystal => initialize_character_save_data(image),
         FigureKind::Trophy => initialize_trophy_save_data(image),
-        FigureKind::Item | FigureKind::LevelPiece | FigureKind::PowerDisc | FigureKind::Unknown => {
-        }
+        FigureKind::Item
+        | FigureKind::LevelPiece
+        | FigureKind::Trap
+        | FigureKind::Vehicle
+        | FigureKind::PowerDisc
+        | FigureKind::Unknown => {}
     }
 }
 

@@ -31,6 +31,10 @@ impl GameLine {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FigureKind {
     Character,
+    Giant,
+    Swapper,
+    TrapMaster,
+    Mini,
     Vehicle,
     Item,
     Trap,
@@ -52,6 +56,10 @@ impl FigureKind {
             Self::LevelPiece => 6,
             Self::Trophy => 7,
             Self::PowerDisc => 8,
+            Self::Giant => 9,
+            Self::Swapper => 10,
+            Self::TrapMaster => 11,
+            Self::Mini => 12,
             Self::Unknown => 255,
         }
     }
@@ -66,6 +74,10 @@ impl FigureKind {
             6 => Self::LevelPiece,
             7 => Self::Trophy,
             8 => Self::PowerDisc,
+            9 => Self::Giant,
+            10 => Self::Swapper,
+            11 => Self::TrapMaster,
+            12 => Self::Mini,
             _ => Self::Unknown,
         }
     }
@@ -73,6 +85,10 @@ impl FigureKind {
     pub const fn wire_name(self) -> &'static str {
         match self {
             Self::Character => "character",
+            Self::Giant => "giant",
+            Self::Swapper => "swapper",
+            Self::TrapMaster => "trap-master",
+            Self::Mini => "mini",
             Self::Vehicle => "vehicle",
             Self::Item => "item",
             Self::Trap => "trap",
@@ -82,6 +98,13 @@ impl FigureKind {
             Self::PowerDisc => "power-disc",
             Self::Unknown => "unknown",
         }
+    }
+
+    pub const fn is_character_like(self) -> bool {
+        matches!(
+            self,
+            Self::Character | Self::Giant | Self::Swapper | Self::TrapMaster | Self::Mini
+        )
     }
 }
 

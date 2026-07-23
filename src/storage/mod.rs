@@ -1119,6 +1119,10 @@ fn entity_kind_is_mutable(kind: FigureKind) -> bool {
     matches!(
         kind,
         FigureKind::Character
+            | FigureKind::Giant
+            | FigureKind::Swapper
+            | FigureKind::TrapMaster
+            | FigureKind::Mini
             | FigureKind::Trap
             | FigureKind::CreationCrystal
             | FigureKind::Vehicle
@@ -1130,7 +1134,7 @@ fn entity_can_use_active_slot(entity: Entity, slot: usize) -> bool {
     match entity.game_line {
         GameLine::Skylanders => slot < MAX_FIGURES,
         GameLine::Infinity => match entity.kind {
-            FigureKind::Character | FigureKind::Unknown => slot < 2,
+            kind if kind.is_character_like() || kind == FigureKind::Unknown => slot < 2,
             _ => slot == 2,
         },
     }
