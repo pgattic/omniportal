@@ -78,13 +78,49 @@ struct SkylandersPortalClass<'a, B: usb_device::bus::UsbBus> {
     ep_in: EndpointIn<'a, B>,
     ep_out: EndpointOut<'a, B>,
     state: skylanders::PortalState,
-    queue: [Option<skylanders::Report>; REPORT_QUEUE_LEN],
+    queue: [Option<QueuedReport>; REPORT_QUEUE_LEN],
     out_buf: [u8; skylanders::MAX_PACKET_BYTES],
     idle_rate: u8,
     protocol: u8,
     storage_poll_ticks: u8,
     active_selection_marker: ([Option<u32>; skylanders::MAX_FIGURES], u32),
     dirty_write_deadline: Option<Instant>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct QueuedReport {
+    bytes: [u8; skylanders::MAX_PACKET_BYTES],
+    len: usize,
+}
+
+impl QueuedReport {
+    fn new(data: &[u8]) -> Self {
+        let len = data.len().min(skylanders::MAX_PACKET_BYTES);
+        let mut bytes = [0; skylanders::MAX_PACKET_BYTES];
+        bytes[..len].copy_from_slice(&data[..len]);
+        Self { bytes, len }
+    }
+
+    const fn from_status(report: skylanders::Report) -> Self {
+        let mut bytes = [0; skylanders::MAX_PACKET_BYTES];
+        let mut index = 0;
+        while index < skylanders::REPORT_BYTES {
+            bytes[index] = report[index];
+            index += 1;
+        }
+        Self {
+            bytes,
+            len: skylanders::REPORT_BYTES,
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    const fn op(&self) -> u8 {
+        self.bytes[0]
+    }
 }
 
 impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
@@ -125,6 +161,20 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     fn poll_out_endpoint(&mut self) {
         match self.ep_out.read(&mut self.out_buf) {
             Ok(count) => {
+                if count > skylanders::REPORT_BYTES {
+                    let mut packet = [0; skylanders::MAX_PACKET_BYTES];
+                    packet[..count].copy_from_slice(&self.out_buf[..count]);
+                    match self.ep_in.write(&packet[..count]) {
+                        Ok(_) => {}
+                        Err(UsbError::WouldBlock) => self.push_audio_report(&packet[..count]),
+                        Err(error) => println!(
+                            "Skylanders USB interrupt IN audio echo write error: {:?}",
+                            error
+                        ),
+                    }
+                    return;
+                }
+
                 let mut command = [0; skylanders::MAX_PACKET_BYTES];
                 command[..count].copy_from_slice(&self.out_buf[..count]);
                 self.handle_command_source("intr-out", &command[..count]);
@@ -138,7 +188,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
 
     fn poll_in_endpoint(&mut self) {
         if let Some(report) = self.pop_report() {
-            match self.ep_in.write(&report) {
+            match self.ep_in.write(report.as_slice()) {
                 Ok(_) => {}
                 Err(UsbError::WouldBlock) => {
                     self.push_report_front(report);
@@ -253,7 +303,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         self.drop_queued_status_reports();
         for _ in 0..count {
             let report = self.state.next_status_report();
-            if !self.push_report_if_space(report) {
+            if !self.push_report_if_space(QueuedReport::from_status(report)) {
                 break;
             }
         }
@@ -321,14 +371,30 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
     }
 
     fn push_report(&mut self, report: skylanders::Report) {
-        if self.push_report_if_space(report) {
+        if self.push_report_if_space(QueuedReport::from_status(report)) {
             return;
         }
         println!("Skylanders USB response queue full; dropping newest queued response");
-        self.queue[REPORT_QUEUE_LEN - 1] = Some(report);
+        self.queue[REPORT_QUEUE_LEN - 1] = Some(QueuedReport::from_status(report));
     }
 
-    fn push_report_if_space(&mut self, report: skylanders::Report) -> bool {
+    fn push_audio_report(&mut self, report: &[u8]) {
+        let queued = QueuedReport::new(report);
+        if self.push_report_if_space(queued) {
+            return;
+        }
+
+        // Trap Team streams portal audio as 64-byte interrupt OUT packets and expects the portal to
+        // echo them on interrupt IN. Dropping audio first keeps status/read/write responses moving.
+        for slot in &mut self.queue {
+            if slot.map(|queued| queued.len > skylanders::REPORT_BYTES) == Some(true) {
+                *slot = Some(queued);
+                return;
+            }
+        }
+    }
+
+    fn push_report_if_space(&mut self, report: QueuedReport) -> bool {
         for slot in &mut self.queue {
             if slot.is_none() {
                 *slot = Some(report);
@@ -342,7 +408,7 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         let mut compacted = [None; REPORT_QUEUE_LEN];
         let mut next = 0;
         for report in self.queue.iter().flatten().copied() {
-            if report[0] != b'S' {
+            if report.op() != b'S' {
                 compacted[next] = Some(report);
                 next += 1;
             }
@@ -350,14 +416,14 @@ impl<'a, B: usb_device::bus::UsbBus> SkylandersPortalClass<'a, B> {
         self.queue = compacted;
     }
 
-    fn push_report_front(&mut self, report: skylanders::Report) {
+    fn push_report_front(&mut self, report: QueuedReport) {
         for index in (1..REPORT_QUEUE_LEN).rev() {
             self.queue[index] = self.queue[index - 1];
         }
         self.queue[0] = Some(report);
     }
 
-    fn pop_report(&mut self) -> Option<skylanders::Report> {
+    fn pop_report(&mut self) -> Option<QueuedReport> {
         let report = self.queue[0]?;
         for index in 1..REPORT_QUEUE_LEN {
             self.queue[index - 1] = self.queue[index];
@@ -412,10 +478,10 @@ impl<B: usb_device::bus::UsbBus> UsbClass<B> for SkylandersPortalClass<'_, B> {
         if req.request_type == RequestType::Class && req.recipient == Recipient::Interface {
             match req.request {
                 skylanders::HID_GET_REPORT_REQUEST => {
-                    let report = self
-                        .pop_report()
-                        .unwrap_or_else(|| self.state.next_status_report());
-                    let _ = xfer.accept_with(&report);
+                    let report = self.pop_report().unwrap_or_else(|| {
+                        QueuedReport::from_status(self.state.next_status_report())
+                    });
+                    let _ = xfer.accept_with(report.as_slice());
                 }
                 skylanders::HID_GET_IDLE_REQUEST => {
                     let _ = xfer.accept_with(&[self.idle_rate]);

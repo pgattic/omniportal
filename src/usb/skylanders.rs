@@ -91,7 +91,6 @@ pub const HID_REPORT_DESCRIPTOR: &[u8] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PortalState {
     pub active: bool,
-    status_updated: bool,
     pub interrupt_counter: u8,
     slots: [PortalSlot; MAX_FIGURES],
 }
@@ -110,7 +109,6 @@ impl PortalState {
     pub const fn new() -> Self {
         Self {
             active: true,
-            status_updated: false,
             interrupt_counter: 0,
             slots: [PortalSlot::new(); MAX_FIGURES],
         }
@@ -251,20 +249,6 @@ impl PortalState {
             slot.collapse_for_deactivate();
         }
         self.active = false;
-    }
-
-    pub fn update_status(&mut self) {
-        if self.status_updated {
-            return;
-        }
-
-        for slot in &mut self.slots {
-            if !slot.slot_status.is_present() {
-                continue;
-            }
-            slot.enqueue_statuses(&[SlotStatus::Removing, SlotStatus::Added, SlotStatus::Ready]);
-        }
-        self.status_updated = true;
     }
 
     pub fn next_status_report(&mut self) -> Report {
@@ -471,13 +455,10 @@ pub fn handle_command(state: &mut PortalState, command: &[u8]) -> Option<Command
                 queue_report: true,
             })
         }
-        b'R' => {
-            state.update_status();
-            Some(CommandResponse {
-                report: ready_response(),
-                queue_report: true,
-            })
-        }
+        b'R' => Some(CommandResponse {
+            report: ready_response(),
+            queue_report: true,
+        }),
         b'S' => Some(CommandResponse {
             report: state.next_status_report(),
             queue_report: false,
@@ -680,6 +661,18 @@ mod tests {
         for _ in 0..PLACEMENT_STATUS_HOLD_REPORTS {
             assert_eq!(state.next_status_report()[1], SlotStatus::Added as u8);
         }
+        assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
+    }
+
+    #[test]
+    fn ready_command_does_not_synthesize_toy_movement() {
+        let mut state = PortalState::new();
+        assert!(state.load_entity(42, &[0; FIGURE_IMAGE_BYTES]));
+        advance_slot_status(&mut state, SlotStatus::Ready);
+
+        let response = handle_command(&mut state, &[b'R', 0x00]).unwrap();
+
+        assert_eq!(response.report[..3], [b'R', 0x02, 0x1b]);
         assert_eq!(state.next_status_report()[1], SlotStatus::Ready as u8);
     }
 
