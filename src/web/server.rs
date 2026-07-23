@@ -93,6 +93,12 @@ async fn handle_request(socket: &mut TcpSocket<'_>, request: &[u8]) {
             crate::storage::create_entity_from_catalog_params(http::params(query, body).as_str()),
         )
         .await;
+    } else if method == "POST" && path == "/api/entity/create-swapper" {
+        write_storage_result(
+            socket,
+            crate::storage::create_swapper_combo_from_params(http::params(query, body).as_str()),
+        )
+        .await;
     } else if method == "POST" && path == "/api/entity/upload" {
         let result = if query.is_empty() {
             crate::storage::upload_entity_from_form_params(http::params(query, body).as_str())
@@ -330,8 +336,20 @@ fn catalog_entry_matches(
     search: &str,
 ) -> bool {
     if let Some(kind) = kind {
-        if !kind.is_empty() && kind != entry.kind.wire_name() {
-            return false;
+        match kind {
+            "" => {}
+            "swapper-top" => {
+                if !skylanders_catalog_entry_is_swapper_top(entry) {
+                    return false;
+                }
+            }
+            "swapper-bottom" => {
+                if !skylanders_catalog_entry_is_swapper_bottom(entry) {
+                    return false;
+                }
+            }
+            other if other != entry.kind.wire_name() => return false,
+            _ => {}
         }
     }
     if search.is_empty() {
@@ -340,6 +358,18 @@ fn catalog_entry_matches(
 
     contains_ascii_case_insensitive(entry.name, search)
         || format!("{}", entry.character_id).contains(search)
+}
+
+fn skylanders_catalog_entry_is_swapper_top(
+    entry: &crate::figures::skylanders::catalog::FigureCatalogEntry,
+) -> bool {
+    entry.kind == crate::domain::FigureKind::Swapper && (2000..=2015).contains(&entry.character_id)
+}
+
+fn skylanders_catalog_entry_is_swapper_bottom(
+    entry: &crate::figures::skylanders::catalog::FigureCatalogEntry,
+) -> bool {
+    entry.kind == crate::domain::FigureKind::Swapper && (1000..=1015).contains(&entry.character_id)
 }
 
 fn infinity_catalog_entry_matches(
@@ -506,5 +536,24 @@ async fn write_all(socket: &mut TcpSocket<'_>, mut bytes: &[u8]) {
             Ok(0) | Err(_) => break,
             Ok(written) => bytes = &bytes[written..],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::figures::skylanders::catalog::SKYLANDERS_CATALOG;
+
+    #[test]
+    fn skylanders_catalog_filters_swapper_tops_and_bottoms_separately() {
+        let bottom = &SKYLANDERS_CATALOG[438];
+        let top = &SKYLANDERS_CATALOG[469];
+
+        assert_eq!(bottom.name, "Jet");
+        assert_eq!(top.name, "Boom");
+        assert!(catalog_entry_matches(bottom, Some("swapper-bottom"), ""));
+        assert!(!catalog_entry_matches(bottom, Some("swapper-top"), ""));
+        assert!(catalog_entry_matches(top, Some("swapper-top"), ""));
+        assert!(!catalog_entry_matches(top, Some("swapper-bottom"), ""));
     }
 }

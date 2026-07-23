@@ -155,13 +155,17 @@ impl Catalog {
     }
 
     pub(super) fn place_entity_in_slot(&mut self, id: RecordId, slot: usize) {
+        self.clear_active_entity(id);
+        if let Some(active_slot) = self.active_slots.get_mut(slot) {
+            *active_slot = Some(id);
+        }
+    }
+
+    pub(super) fn clear_active_entity(&mut self, id: RecordId) {
         for active_slot in &mut self.active_slots {
             if *active_slot == Some(id) {
                 *active_slot = None;
             }
-        }
-        if let Some(active_slot) = self.active_slots.get_mut(slot) {
-            *active_slot = Some(id);
         }
     }
 
@@ -228,10 +232,20 @@ impl Catalog {
                     GameLine::Skylanders => skylanders_catalog_entry(index).map(|entry| entry.name),
                     GameLine::Infinity => infinity_catalog_entry(index).map(|entry| entry.name),
                 });
+            let swapper_top = entity.swapper_top_entity_id.and_then(|id| self.entity(id));
+            let swapper_bottom = entity
+                .swapper_bottom_entity_id
+                .and_then(|id| self.entity(id));
+            let swapper_top_name = swapper_top
+                .map(|item| option_str_json(Some(item.name.as_str())))
+                .unwrap_or_else(|| String::from("null"));
+            let swapper_bottom_name = swapper_bottom
+                .map(|item| option_str_json(Some(item.name.as_str())))
+                .unwrap_or_else(|| String::from("null"));
             let theme = entity_theme(entity);
             let theme_label = entity_theme_label(entity);
             out.push_str(&format!(
-                "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"theme\":\"{}\",\"theme_label\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{}}}",
+                "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"theme\":\"{}\",\"theme_label\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{},\"swapper_top_entity_id\":{},\"swapper_top_name\":{},\"swapper_bottom_entity_id\":{},\"swapper_bottom_name\":{},\"exportable\":{}}}",
                 entity.id.0,
                 json_escape(entity.name.as_str()),
                 option_str_json(figure_name),
@@ -246,7 +260,12 @@ impl Catalog {
                 option_u32_json(entity.variant_id),
                 option_blob_id_json(entity.blob_id),
                 entity.image_len,
-                entity.image_crc32
+                entity.image_crc32,
+                option_record_id_json(entity.swapper_top_entity_id),
+                swapper_top_name,
+                option_record_id_json(entity.swapper_bottom_entity_id),
+                swapper_bottom_name,
+                if entity.is_swapper_combo() { "false" } else { "true" }
             ));
         }
         out.push_str("],\"active_entity_id\":");

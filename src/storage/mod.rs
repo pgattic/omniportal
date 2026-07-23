@@ -229,20 +229,7 @@ pub fn active_slot_images_for_game(
     game_line: GameLine,
     max_slots: usize,
 ) -> Result<Vec<(u8, RecordId, Vec<u8>)>, StorageError> {
-    with_store_mut(|store| {
-        let mut images = Vec::new();
-        for slot in 0..MAX_FIGURES.min(max_slots) {
-            let Some(id) = store.catalog.active_slots[slot] else {
-                continue;
-            };
-            let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
-            if entity.game_line != game_line {
-                continue;
-            }
-            images.push((slot as u8, id, read_entity_image(store, entity)?));
-        }
-        Ok(images)
-    })
+    with_store_mut(|store| active_slot_images_from_store(store, game_line, max_slots))
 }
 
 pub fn create_identity_from_query(query: &str) -> Result<String, StorageError> {
@@ -332,6 +319,8 @@ pub fn create_entity_from_query(query: &str) -> Result<String, StorageError> {
             image_crc32,
             created_generation: entity_generation,
             updated_generation: entity_generation,
+            swapper_top_entity_id: None,
+            swapper_bottom_entity_id: None,
         };
         append_entity_record(store, entity)?;
         Ok(format!(
@@ -358,6 +347,60 @@ pub fn create_entity_from_catalog_params(params: &str) -> Result<String, Storage
         GameLine::Skylanders => create_skylanders_entity_from_catalog(catalog_index, &name),
         GameLine::Infinity => create_infinity_entity_from_catalog(catalog_index, &name),
     }
+}
+
+pub fn create_swapper_combo_from_params(params: &str) -> Result<String, StorageError> {
+    let top_id = query_param(params, "top_id")
+        .and_then(|value| parse_u32(value.as_str()))
+        .ok_or(StorageError::BadRequest)?;
+    let bottom_id = query_param(params, "bottom_id")
+        .and_then(|value| parse_u32(value.as_str()))
+        .ok_or(StorageError::BadRequest)?;
+    let name = query_param(params, "name").ok_or(StorageError::BadRequest)?;
+
+    with_store_mut(|store| {
+        let top = store
+            .catalog
+            .entity(RecordId(top_id))
+            .ok_or(StorageError::NotFound)?;
+        let bottom = store
+            .catalog
+            .entity(RecordId(bottom_id))
+            .ok_or(StorageError::NotFound)?;
+        if !is_swapper_top(top) || !is_swapper_bottom(bottom) {
+            return Err(StorageError::BadRequest);
+        }
+
+        let id = store.catalog.next_record_id();
+        let generation = store.catalog.next_generation();
+        let entity = Entity {
+            id,
+            name: FixedText::from_str(&name).map_err(|_| StorageError::BadRequest)?,
+            parent_identity_id: None,
+            catalog_index: None,
+            game_line: GameLine::Skylanders,
+            kind: FigureKind::Swapper,
+            data_mode: EntityDataMode::StaticGenerated,
+            character_id: top.character_id,
+            variant_id: top.variant_id,
+            blob_id: None,
+            image_format: ImageFormat::SkylandersMifare1k,
+            image_len: top.image_len.saturating_add(bottom.image_len),
+            image_crc32: 0,
+            created_generation: generation,
+            updated_generation: generation,
+            swapper_top_entity_id: Some(top.id),
+            swapper_bottom_entity_id: Some(bottom.id),
+        };
+        append_entity_record(store, entity)?;
+        Ok(format!(
+            "{{\"created\":\"swapper\",\"id\":{},\"top_id\":{},\"bottom_id\":{},\"name\":\"{}\"}}\n",
+            id.0,
+            top.id.0,
+            bottom.id.0,
+            json_escape(entity.name.as_str())
+        ))
+    })
 }
 
 fn create_skylanders_entity_from_catalog(
@@ -407,6 +450,8 @@ fn create_skylanders_entity_from_catalog(
             image_crc32,
             created_generation: generation,
             updated_generation: generation,
+            swapper_top_entity_id: None,
+            swapper_bottom_entity_id: None,
         };
         append_entity_record(store, entity)?;
         Ok(format!(
@@ -446,6 +491,8 @@ fn create_infinity_entity_from_catalog(
             image_crc32: crc32(&image),
             created_generation: generation,
             updated_generation: generation,
+            swapper_top_entity_id: None,
+            swapper_bottom_entity_id: None,
         };
         append_entity_record(store, entity)?;
         Ok(format!(
@@ -518,6 +565,8 @@ fn upload_skylanders_entity_from_params(
             image_crc32,
             created_generation: generation,
             updated_generation: generation,
+            swapper_top_entity_id: None,
+            swapper_bottom_entity_id: None,
         };
         append_entity_record(store, entity)?;
         Ok(format!(
@@ -566,6 +615,8 @@ fn upload_infinity_entity_from_params(params: &str, image: &[u8]) -> Result<Stri
             image_crc32: crc32(image),
             created_generation: generation,
             updated_generation: generation,
+            swapper_top_entity_id: None,
+            swapper_bottom_entity_id: None,
         };
         append_entity_record(store, entity)?;
         Ok(format!(
@@ -617,6 +668,8 @@ pub fn clone_entity_from_params(params: &str) -> Result<String, StorageError> {
             image_crc32,
             created_generation: generation,
             updated_generation: generation,
+            swapper_top_entity_id: None,
+            swapper_bottom_entity_id: None,
         };
         append_entity_record(store, clone)?;
         Ok(format!(
@@ -665,6 +718,20 @@ pub fn rename_identity_from_query(query: &str) -> Result<String, StorageError> {
 }
 
 pub fn delete_entity_from_query(query: &str) -> Result<String, StorageError> {
+    let id = query_param(query, "id")
+        .and_then(|value| parse_u32(value.as_str()))
+        .ok_or(StorageError::BadRequest)?;
+    let referenced_by_combo = with_store(|store| {
+        store.catalog.entities.iter().flatten().any(|entity| {
+            entity.swapper_top_entity_id == Some(RecordId(id))
+                || entity.swapper_bottom_entity_id == Some(RecordId(id))
+        })
+    })
+    .ok_or(StorageError::Uninitialized)?;
+    if referenced_by_combo {
+        return Err(StorageError::BadRequest);
+    }
+
     delete_record_from_query(query, "entity", RECORD_KIND_ENTITY_DELETE, |catalog, id| {
         catalog.delete_entity(id)
     })
@@ -723,6 +790,16 @@ pub fn select_entity_from_params(params: &str) -> Result<String, StorageError> {
             return Err(StorageError::BadRequest);
         }
         let generation = store.catalog.next_generation();
+        if entity.is_swapper_combo() {
+            store.catalog.active_slots[slot as usize] = None;
+            store.catalog.active_slots[slot as usize + 1] = None;
+            if let Some(top_id) = entity.swapper_top_entity_id {
+                store.catalog.clear_active_entity(top_id);
+            }
+            if let Some(bottom_id) = entity.swapper_bottom_entity_id {
+                store.catalog.clear_active_entity(bottom_id);
+            }
+        }
         store.catalog.place_entity_in_slot(id, slot as usize);
         store.catalog.active_config_generation = generation;
         Ok(format!(
@@ -795,7 +872,7 @@ fn compact_store(store: &mut Store) -> Result<(), StorageError> {
             .entities
             .iter()
             .flatten()
-            .any(|entity| entity.blob_id == Some(blob.id));
+            .any(|entity| entity_uses_blob(&store.catalog, *entity, blob.id));
         if is_live_entity {
             blob_ids.push(blob.id);
         }
@@ -984,6 +1061,48 @@ fn read_entity_blob_from_store(
     read_entity_image(store, entity)
 }
 
+fn active_slot_images_from_store(
+    store: &mut Store,
+    game_line: GameLine,
+    max_slots: usize,
+) -> Result<Vec<(u8, RecordId, Vec<u8>)>, StorageError> {
+    let mut images = Vec::new();
+    for slot in 0..MAX_FIGURES.min(max_slots) {
+        let Some(id) = store.catalog.active_slots[slot] else {
+            continue;
+        };
+        let entity = store.catalog.entity(id).ok_or(StorageError::NotFound)?;
+        if entity.game_line != game_line {
+            continue;
+        }
+        if game_line == GameLine::Skylanders && entity.is_swapper_combo() {
+            let Some(top_id) = entity.swapper_top_entity_id else {
+                return Err(StorageError::Corrupt);
+            };
+            let Some(bottom_id) = entity.swapper_bottom_entity_id else {
+                return Err(StorageError::Corrupt);
+            };
+            if slot + 1 >= max_slots {
+                return Err(StorageError::BadRequest);
+            }
+            let top = store.catalog.entity(top_id).ok_or(StorageError::Corrupt)?;
+            let bottom = store
+                .catalog
+                .entity(bottom_id)
+                .ok_or(StorageError::Corrupt)?;
+            images.push((slot as u8, top_id, read_entity_image(store, top)?));
+            images.push((
+                (slot + 1) as u8,
+                bottom_id,
+                read_entity_image(store, bottom)?,
+            ));
+            continue;
+        }
+        images.push((slot as u8, id, read_entity_image(store, entity)?));
+    }
+    Ok(images)
+}
+
 fn replace_entity_blob_in_store(
     store: &mut Store,
     entity_id: RecordId,
@@ -1015,12 +1134,38 @@ fn replace_entity_blob_in_store(
 }
 
 fn read_entity_image(store: &mut Store, entity: Entity) -> Result<Vec<u8>, StorageError> {
+    if entity.is_swapper_combo() {
+        return Err(StorageError::BadRequest);
+    }
     let image = if let Some(blob_id) = entity.blob_id {
         read_blob(store, blob_id)?
     } else {
         generated_entity_image(entity)
     };
     Ok(image)
+}
+
+fn entity_uses_blob(catalog: &Catalog, entity: Entity, blob_id: BlobId) -> bool {
+    if entity.blob_id == Some(blob_id) {
+        return true;
+    }
+    if let Some(top_id) = entity.swapper_top_entity_id {
+        if catalog
+            .entity(top_id)
+            .is_some_and(|top| top.blob_id == Some(blob_id))
+        {
+            return true;
+        }
+    }
+    if let Some(bottom_id) = entity.swapper_bottom_entity_id {
+        if catalog
+            .entity(bottom_id)
+            .is_some_and(|bottom| bottom.blob_id == Some(blob_id))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn generated_entity_image(entity: Entity) -> Vec<u8> {
@@ -1132,12 +1277,34 @@ fn entity_kind_is_mutable(kind: FigureKind) -> bool {
 
 fn entity_can_use_active_slot(entity: Entity, slot: usize) -> bool {
     match entity.game_line {
+        GameLine::Skylanders if entity.is_swapper_combo() => slot + 1 < MAX_FIGURES,
+        GameLine::Skylanders if is_swapper_half(entity) => false,
         GameLine::Skylanders => slot < MAX_FIGURES,
         GameLine::Infinity => match entity.kind {
             kind if kind.is_character_like() || kind == FigureKind::Unknown => slot < 2,
             _ => slot == 2,
         },
     }
+}
+
+fn is_swapper_half(entity: Entity) -> bool {
+    is_swapper_top(entity) || is_swapper_bottom(entity)
+}
+
+fn is_swapper_top(entity: Entity) -> bool {
+    entity.game_line == GameLine::Skylanders
+        && entity.kind == FigureKind::Swapper
+        && entity.swapper_top_entity_id.is_none()
+        && entity.swapper_bottom_entity_id.is_none()
+        && (2000..=2015).contains(&entity.character_id)
+}
+
+fn is_swapper_bottom(entity: Entity) -> bool {
+    entity.game_line == GameLine::Skylanders
+        && entity.kind == FigureKind::Swapper
+        && entity.swapper_top_entity_id.is_none()
+        && entity.swapper_bottom_entity_id.is_none()
+        && (1000..=1015).contains(&entity.character_id)
 }
 
 fn with_store<R>(f: impl FnOnce(&Store) -> R) -> Option<R> {

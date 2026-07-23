@@ -335,6 +335,22 @@ pub(super) fn encode_entity(entity: &Entity) -> [u8; 128] {
     out[32..36].copy_from_slice(&entity.character_id.to_le_bytes());
     out[36..40].copy_from_slice(&entity.variant_id.unwrap_or(0).to_le_bytes());
     out[40..42].copy_from_slice(&entity.catalog_index.unwrap_or(0).to_le_bytes());
+    out[42] = u8::from(entity.swapper_top_entity_id.is_some());
+    out[43] = u8::from(entity.swapper_bottom_entity_id.is_some());
+    out[44..48].copy_from_slice(
+        &entity
+            .swapper_top_entity_id
+            .map(|id| id.0)
+            .unwrap_or(0)
+            .to_le_bytes(),
+    );
+    out[112..116].copy_from_slice(
+        &entity
+            .swapper_bottom_entity_id
+            .map(|id| id.0)
+            .unwrap_or(0)
+            .to_le_bytes(),
+    );
     out[48..48 + entity.name.len()].copy_from_slice(entity.name.raw_bytes());
     out
 }
@@ -382,6 +398,20 @@ pub(super) fn decode_entity(id: u32, _generation: u32, payload: &[u8]) -> Option
         image_crc32: u32::from_le_bytes(payload[20..24].try_into().ok()?),
         created_generation: u32::from_le_bytes(payload[24..28].try_into().ok()?),
         updated_generation: u32::from_le_bytes(payload[28..32].try_into().ok()?),
+        swapper_top_entity_id: if payload[42] == 1 {
+            Some(RecordId(u32::from_le_bytes(
+                payload[44..48].try_into().ok()?,
+            )))
+        } else {
+            None
+        },
+        swapper_bottom_entity_id: if payload[43] == 1 {
+            Some(RecordId(u32::from_le_bytes(
+                payload[112..116].try_into().ok()?,
+            )))
+        } else {
+            None
+        },
     })
 }
 

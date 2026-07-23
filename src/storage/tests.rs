@@ -36,6 +36,8 @@ fn test_entity() -> Entity {
         image_crc32: 0xabcd_1234,
         created_generation: 12,
         updated_generation: 13,
+        swapper_top_entity_id: None,
+        swapper_bottom_entity_id: None,
     }
 }
 
@@ -129,6 +131,18 @@ fn identity_and_entity_payloads_round_trip() {
         ),
         Some(entity)
     );
+
+    let mut combo = entity;
+    combo.id = RecordId(30);
+    combo.kind = FigureKind::Swapper;
+    combo.data_mode = EntityDataMode::StaticGenerated;
+    combo.blob_id = None;
+    combo.swapper_top_entity_id = Some(RecordId(31));
+    combo.swapper_bottom_entity_id = Some(RecordId(32));
+    assert_eq!(
+        decode_entity(combo.id.0, combo.updated_generation, &encode_entity(&combo)),
+        Some(combo)
+    );
 }
 
 #[test]
@@ -177,6 +191,27 @@ fn infinity_entities_are_limited_to_compatible_active_slots() {
     assert!(!entity_can_use_active_slot(disc, 0));
     assert!(!entity_can_use_active_slot(disc, 1));
     assert!(entity_can_use_active_slot(disc, 2));
+}
+
+#[test]
+fn raw_swapper_halves_are_not_directly_placeable() {
+    let mut top = test_entity();
+    top.kind = FigureKind::Swapper;
+    top.character_id = 2004;
+    top.swapper_top_entity_id = None;
+    top.swapper_bottom_entity_id = None;
+
+    let mut bottom = top;
+    bottom.character_id = 1004;
+
+    let mut combo = top;
+    combo.swapper_top_entity_id = Some(RecordId(41));
+    combo.swapper_bottom_entity_id = Some(RecordId(42));
+
+    assert!(!entity_can_use_active_slot(top, 0));
+    assert!(!entity_can_use_active_slot(bottom, 0));
+    assert!(entity_can_use_active_slot(combo, 0));
+    assert!(!entity_can_use_active_slot(combo, MAX_FIGURES - 1));
 }
 
 #[test]
@@ -308,6 +343,56 @@ fn write_back_loop_exports_replaced_entity_image() {
 }
 
 #[test]
+fn swapper_combo_expands_to_two_physical_skylanders_slots() {
+    let (mut store, top_image, bottom_image) = store_with_swapper_combo(RecordId(40), 2);
+
+    let images = active_slot_images_from_store(&mut store, GameLine::Skylanders, MAX_FIGURES)
+        .expect("active images");
+
+    assert_eq!(images.len(), 2);
+    assert_eq!(images[0].0, 2);
+    assert_eq!(images[0].1, RecordId(41));
+    assert_eq!(images[0].2, top_image);
+    assert_eq!(images[1].0, 3);
+    assert_eq!(images[1].1, RecordId(42));
+    assert_eq!(images[1].2, bottom_image);
+}
+
+#[test]
+fn swapper_combo_writeback_updates_only_addressed_half() {
+    let (mut store, top_image, bottom_image) = store_with_swapper_combo(RecordId(50), 0);
+    let images = active_slot_images_from_store(&mut store, GameLine::Skylanders, MAX_FIGURES)
+        .expect("active images");
+    let mut portal = PortalState::new();
+    for (slot, entity_id, image) in &images {
+        assert!(portal.load_entity_into_slot(*slot, entity_id.0, image));
+    }
+    for _ in 0..=PLACEMENT_STATUS_HOLD_REPORTS {
+        portal.next_status_report();
+    }
+
+    let mut write_command = [0; 19];
+    write_command[0] = b'W';
+    write_command[1] = 0x00;
+    write_command[2] = 0x02;
+    write_command[3..].copy_from_slice(&[0xa5; 16]);
+    handle_command(&mut portal, &write_command).unwrap();
+
+    let changed_top = portal.slot_image(0).unwrap();
+    replace_entity_blob_in_store(&mut store, images[0].1, changed_top).unwrap();
+
+    assert_ne!(changed_top, top_image.as_slice());
+    assert_eq!(
+        read_entity_blob_from_store(&mut store, RecordId(41)).unwrap(),
+        changed_top
+    );
+    assert_eq!(
+        read_entity_blob_from_store(&mut store, RecordId(42)).unwrap(),
+        bottom_image
+    );
+}
+
+#[test]
 fn replacing_entity_with_unchanged_image_does_not_append_records() {
     let entity_id = RecordId(8);
     let (mut store, image) = store_with_mutable_entity(entity_id);
@@ -434,6 +519,72 @@ fn store_with_mutable_entity(entity_id: RecordId) -> (Store, Vec<u8>) {
     append_entity_record(&mut store, entity).unwrap();
 
     (store, image.to_vec())
+}
+
+fn store_with_swapper_combo(combo_id: RecordId, slot: usize) -> (Store, Vec<u8>, Vec<u8>) {
+    let mut store = Store {
+        flash: StorageFlash::new(),
+        catalog: Catalog::new(),
+    };
+    append_record(
+        &mut store.flash,
+        &mut store.catalog,
+        RECORD_KIND_FORMAT_MARKER,
+        0,
+        1,
+        b"omniportal-storage-v1",
+    )
+    .unwrap();
+
+    let top_id = RecordId(41);
+    let bottom_id = RecordId(42);
+    let top_image = initialize_new_entity_image(FigureKind::Swapper, 2000, None, top_id.0);
+    let bottom_image = initialize_new_entity_image(FigureKind::Swapper, 1000, None, bottom_id.0);
+    let top_blob_id = append_blob(&mut store.flash, &mut store.catalog, &top_image).unwrap();
+    let bottom_blob_id = append_blob(&mut store.flash, &mut store.catalog, &bottom_image).unwrap();
+
+    let mut top = test_entity();
+    top.id = top_id;
+    top.name = FixedText::from_str("Blast Zone Top").unwrap();
+    top.parent_identity_id = None;
+    top.catalog_index = None;
+    top.kind = FigureKind::Swapper;
+    top.character_id = 2000;
+    top.variant_id = None;
+    top.blob_id = Some(top_blob_id);
+    top.image_crc32 = crc32(&top_image);
+    append_entity_record(&mut store, top).unwrap();
+
+    let mut bottom = test_entity();
+    bottom.id = bottom_id;
+    bottom.name = FixedText::from_str("Wash Buckler Bottom").unwrap();
+    bottom.parent_identity_id = None;
+    bottom.catalog_index = None;
+    bottom.kind = FigureKind::Swapper;
+    bottom.character_id = 1000;
+    bottom.variant_id = None;
+    bottom.blob_id = Some(bottom_blob_id);
+    bottom.image_crc32 = crc32(&bottom_image);
+    append_entity_record(&mut store, bottom).unwrap();
+
+    let mut combo = test_entity();
+    combo.id = combo_id;
+    combo.name = FixedText::from_str("Blast Buckler").unwrap();
+    combo.parent_identity_id = None;
+    combo.catalog_index = None;
+    combo.kind = FigureKind::Swapper;
+    combo.data_mode = EntityDataMode::StaticGenerated;
+    combo.character_id = 2000;
+    combo.variant_id = None;
+    combo.blob_id = None;
+    combo.image_len = (top_image.len() + bottom_image.len()) as u32;
+    combo.image_crc32 = 0;
+    combo.swapper_top_entity_id = Some(top_id);
+    combo.swapper_bottom_entity_id = Some(bottom_id);
+    append_entity_record(&mut store, combo).unwrap();
+    store.catalog.active_slots[slot] = Some(combo_id);
+
+    (store, top_image.to_vec(), bottom_image.to_vec())
 }
 
 fn full_store_with_mutable_entity(entity_id: RecordId) -> (Store, Vec<u8>) {

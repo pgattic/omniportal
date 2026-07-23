@@ -183,6 +183,17 @@ a{color:var(--accent);font-weight:800;text-decoration:none}
 </form>
 </div>
 </div>
+<div class="panel" id="swapperPanel">
+<h2>Combine Swap Force</h2>
+<form id="swapperForm">
+<div class="row">
+<label>Top Half<select name="top_id" id="swapperTop"></select></label>
+<label>Bottom Half<select name="bottom_id" id="swapperBottom"></select></label>
+</div>
+<label>Nickname<input name="name" id="swapperName" placeholder="Defaults to selected halves"></label>
+<button class="primary" type="submit">Add Combo</button>
+</form>
+</div>
 </section>
 
 <section id="tabSettings" class="tab">
@@ -218,10 +229,11 @@ const catalogKinds = {
     ["", "All types"],
     ["character", "Characters"],
     ["giant", "Giants"],
-    ["swapper", "Swap Force"],
     ["trap-master", "Trap Masters"],
     ["mini", "Minis"],
     ["item", "Magic items"],
+    ["swapper-top", "Swap Force tops"],
+    ["swapper-bottom", "Swap Force bottoms"],
     ["level-piece", "Level pieces"],
     ["trap", "Traps"],
     ["vehicle", "Vehicles"],
@@ -435,9 +447,48 @@ function updateCatalogNicknameHint() {
   $("catalogName").placeholder = name || "Defaults to selected toy";
 }
 
+function renderSwapperForm() {
+  const panel = $("swapperPanel");
+  if (currentMode !== "skylanders") {
+    panel.style.display = "none";
+    return;
+  }
+  panel.style.display = "";
+  const tops = swapperHalves("top");
+  const bottoms = swapperHalves("bottom");
+  $("swapperTop").innerHTML = entityOptions(tops);
+  $("swapperBottom").innerHTML = entityOptions(bottoms);
+  $("swapperForm").querySelector("button").disabled = !tops.length || !bottoms.length;
+  updateSwapperNicknameHint();
+}
+
+function swapperHalves(part) {
+  const predicate = part === "top" ? isSwapperTop : isSwapperBottom;
+  return [...(library.entities || [])]
+    .filter(predicate)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function selectedSwapperHalf(id) {
+  const value = Number($(id).value);
+  return (library.entities || []).find(item => item.id === value);
+}
+
+function suggestedSwapperName() {
+  const top = selectedSwapperHalf("swapperTop");
+  const bottom = selectedSwapperHalf("swapperBottom");
+  if (!top || !bottom) return "";
+  return `${top.name} / ${bottom.name}`;
+}
+
+function updateSwapperNicknameHint() {
+  $("swapperName").placeholder = suggestedSwapperName() || "Defaults to selected halves";
+}
+
 function renderLibrary() {
   renderSlots();
   renderEntities();
+  renderSwapperForm();
 }
 
 function currentGameEntities() {
@@ -459,19 +510,27 @@ function activeSlotsForCurrentMode(slots = library.active_slots || []) {
 function renderEntities() {
   const entities = currentGameEntities();
   const activeSlots = activeSlotsForCurrentMode();
+  const blockedIds = activeComponentEntityIds(activeSlots);
   $("entities").innerHTML = entities.map(item => {
     const slots = activeSlots.filter(slot => slot.entity_id === item.id).map(slot => Number(slot.slot));
+    const blocked = blockedIds.has(item.id);
     const active = slots.length ? `<span class="pill ok">Active</span>` : "";
     const placeOrRemove = slots.length
       ? slots.map(slot => iconButton("Remove", "minus", `removeSlot(${slot})`)).join("")
-      : iconButton("Place", "plus", `placeEntityFirstAvailable(${item.id})`, "primary");
+      : blocked
+        ? `<span class="pill">Part of combo</span>`
+      : isSwapperHalf(item)
+        ? `<span class="pill">Combine first</span>`
+        : iconButton("Place", "plus", `placeEntityFirstAvailable(${item.id})`, "primary");
+    const exportAction = item.exportable === false ? "" : iconLink("Export", "download", `/api/entity/${item.id}.bin`);
+    const cloneAction = item.exportable === false ? "" : iconButton("Clone", "copy", `cloneEntity(${item.id})`);
     return `<div class="item-card${themeClass(item)}"${themeStyle(item)}>` +
       `<div class="item-head"><div><div class="item-name">${escapeHtml(item.name)}</div><div class="item-meta">${entityMeta(item)}${themePill(item)}</div></div>${active}</div>` +
       `<div class="actions">` +
       placeOrRemove +
-      iconButton("Clone", "copy", `cloneEntity(${item.id})`) +
+      cloneAction +
       iconButton("Rename", "edit", `renameRecord('entity',${item.id})`) +
-      iconLink("Export", "download", `/api/entity/${item.id}.bin`) +
+      exportAction +
       iconButton("Delete", "trash", `deleteRecord('entity',${item.id})`, "danger") +
       `</div></div>`;
   }).join("") || `<div class="empty">No ${displayMode(currentMode)} collection items.</div>`;
@@ -496,6 +555,7 @@ function renderSlots() {
   }
 
   const visibleActiveSlots = activeSlots.filter(active => Number(active.slot) < skylandersPortalSlotCount);
+  const blockedIds = activeComponentEntityIds(activeSlots);
   const activeCards = [...visibleActiveSlots]
     .sort((left, right) => Number(left.slot) - Number(right.slot))
     .map(active => {
@@ -504,7 +564,11 @@ function renderSlots() {
     })
     .join("");
   const availableEntities = sortedEntities.filter(item =>
-    item.game === "skylanders" && !activeSlots.some(active => active.entity_id === item.id)
+    item.game === "skylanders" &&
+    !activeSlots.some(active => active.entity_id === item.id) &&
+    !blockedIds.has(item.id) &&
+    !isSwapperHalf(item) &&
+    firstAvailableSlotForEntity(item) != null
   );
   const addCard = firstEmptySlot(activeSlots) == null
     ? `<div class="portal-card portal-add"><div class="portal-name">${deviceName()} Full</div><div class="meta">Remove a toy before adding another.</div></div>`
@@ -543,6 +607,48 @@ function firstEmptySlot(activeSlots) {
   return null;
 }
 
+function firstContiguousEmptySlot(activeSlots, span) {
+  for (let slot = 0; slot <= skylandersPortalSlotCount - span; slot++) {
+    let free = true;
+    for (let offset = 0; offset < span; offset++) {
+      if (activeSlots.some(item => Number(item.slot) === slot + offset)) {
+        free = false;
+        break;
+      }
+    }
+    if (free) return slot;
+  }
+  return null;
+}
+
+function physicalSlotSpan(entity) {
+  return entity && entity.swapper_top_entity_id && entity.swapper_bottom_entity_id ? 2 : 1;
+}
+
+function isSwapperTop(item) {
+  return item && item.game === "skylanders" && item.kind === "swapper" && !item.swapper_top_entity_id && !item.swapper_bottom_entity_id && item.character_id >= 2000 && item.character_id <= 2015;
+}
+
+function isSwapperBottom(item) {
+  return item && item.game === "skylanders" && item.kind === "swapper" && !item.swapper_top_entity_id && !item.swapper_bottom_entity_id && item.character_id >= 1000 && item.character_id <= 1015;
+}
+
+function isSwapperHalf(item) {
+  return isSwapperTop(item) || isSwapperBottom(item);
+}
+
+function activeComponentEntityIds(activeSlots = activeSlotsForCurrentMode()) {
+  const ids = new Set();
+  const entities = library.entities || [];
+  for (const active of activeSlots) {
+    const entity = entities.find(item => item.id === active.entity_id);
+    if (!entity) continue;
+    if (entity.swapper_top_entity_id) ids.add(entity.swapper_top_entity_id);
+    if (entity.swapper_bottom_entity_id) ids.add(entity.swapper_bottom_entity_id);
+  }
+  return ids;
+}
+
 function firstAvailableSlotForEntity(entity) {
   const activeSlots = activeSlotsForCurrentMode();
   if (currentMode === "infinity") {
@@ -553,10 +659,16 @@ function firstAvailableSlotForEntity(entity) {
     return portal ? portal.slot : null;
   }
   if (entity.game !== "skylanders") return null;
-  return firstEmptySlot(activeSlots);
+  if (isSwapperHalf(entity)) return null;
+  return firstContiguousEmptySlot(activeSlots, physicalSlotSpan(entity));
 }
 
 function entityMeta(item) {
+  if (item.swapper_top_entity_id && item.swapper_bottom_entity_id) {
+    const top = item.swapper_top_name || `Top ${item.swapper_top_entity_id}`;
+    const bottom = item.swapper_bottom_name || `Bottom ${item.swapper_bottom_entity_id}`;
+    return [top, bottom, "Swap Force combo"].map(escapeHtml).join(" / ");
+  }
   const toy = item.figure || item.toy || toyIdentifier(item);
   const details = [toy, readableKind(item.kind)];
   if (item.image_len) details.push(`${item.image_len} bytes`);
@@ -667,6 +779,27 @@ async function createFromCatalog() {
   }
 }
 
+async function createSwapperCombo() {
+  const top = selectedSwapperHalf("swapperTop");
+  const bottom = selectedSwapperHalf("swapperBottom");
+  if (!top || !bottom) {
+    say("Choose one top half and one bottom half.");
+    return;
+  }
+  const name = $("swapperName").value.trim() || suggestedSwapperName();
+  try {
+    say(await api("/api/entity/create-swapper", {
+      method:"POST",
+      body:`top_id=${top.id}&bottom_id=${bottom.id}&name=${enc(name)}`
+    }));
+    $("swapperName").value = "";
+    showTab("play");
+    await refreshAll();
+  } catch (error) {
+    say(error.message);
+  }
+}
+
 $("catalogKind").addEventListener("change", () => loadCatalog().catch(error => say(error.message)));
 $("catalogGame").addEventListener("change", () => {
   updateCatalogKindOptions();
@@ -677,6 +810,8 @@ $("catalogSearch").addEventListener("input", () => {
   catalogTimer = setTimeout(() => loadCatalog().catch(error => say(error.message)), 250);
 });
 $("catalogSelect").addEventListener("change", updateCatalogNicknameHint);
+$("swapperTop").addEventListener("change", updateSwapperNicknameHint);
+$("swapperBottom").addEventListener("change", updateSwapperNicknameHint);
 $("collectionSearch").addEventListener("input", () => {
   clearTimeout(collectionTimer);
   collectionTimer = setTimeout(renderEntities, 120);
@@ -685,6 +820,11 @@ $("collectionSearch").addEventListener("input", () => {
 $("entityForm").addEventListener("submit", event => {
   event.preventDefault();
   createFromCatalog();
+});
+
+$("swapperForm").addEventListener("submit", event => {
+  event.preventDefault();
+  createSwapperCombo();
 });
 
 $("uploadEntityForm").addEventListener("submit", async event => {

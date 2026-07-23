@@ -114,9 +114,17 @@ pub struct Entity {
     pub image_crc32: u32,
     pub created_generation: u32,
     pub updated_generation: u32,
+    pub swapper_top_entity_id: Option<RecordId>,
+    pub swapper_bottom_entity_id: Option<RecordId>,
 }
 
 impl Entity {
+    pub fn is_swapper_combo(self) -> bool {
+        self.kind == FigureKind::Swapper
+            && self.swapper_top_entity_id.is_some()
+            && self.swapper_bottom_entity_id.is_some()
+    }
+
     pub fn domain_entity(self) -> CollectionEntity {
         CollectionEntity {
             id: self.id.0,
