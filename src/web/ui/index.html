@@ -676,8 +676,19 @@ function entityMeta(item) {
 }
 
 function themePill(item) {
-  if (!themeColor(item.theme) || !item.theme_label || item.theme_label === "Unknown") return "";
-  return `<span class="theme-pill">${escapeHtml(item.theme_label)}</span>`;
+  if (item.swapper_top_entity_id && item.swapper_bottom_entity_id) {
+    return [
+      themedPill(item.swapper_top_theme, item.swapper_top_theme_label),
+      themedPill(item.swapper_bottom_theme, item.swapper_bottom_theme_label)
+    ].join("");
+  }
+  return themedPill(item.theme, item.theme_label);
+}
+
+function themedPill(theme, label) {
+  const color = themeColor(theme);
+  if (!color || !label || label === "Unknown") return "";
+  return `<span class="theme-pill" style="--theme-color:${color}">${escapeHtml(label)}</span>`;
 }
 
 function themeClass(item) {

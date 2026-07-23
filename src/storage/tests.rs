@@ -538,7 +538,7 @@ fn store_with_swapper_combo(combo_id: RecordId, slot: usize) -> (Store, Vec<u8>,
 
     let top_id = RecordId(41);
     let bottom_id = RecordId(42);
-    let top_image = initialize_new_entity_image(FigureKind::Swapper, 2000, None, top_id.0);
+    let top_image = initialize_new_entity_image(FigureKind::Swapper, 2004, None, top_id.0);
     let bottom_image = initialize_new_entity_image(FigureKind::Swapper, 1000, None, bottom_id.0);
     let top_blob_id = append_blob(&mut store.flash, &mut store.catalog, &top_image).unwrap();
     let bottom_blob_id = append_blob(&mut store.flash, &mut store.catalog, &bottom_image).unwrap();
@@ -549,7 +549,7 @@ fn store_with_swapper_combo(combo_id: RecordId, slot: usize) -> (Store, Vec<u8>,
     top.parent_identity_id = None;
     top.catalog_index = None;
     top.kind = FigureKind::Swapper;
-    top.character_id = 2000;
+    top.character_id = 2004;
     top.variant_id = None;
     top.blob_id = Some(top_blob_id);
     top.image_crc32 = crc32(&top_image);
@@ -574,7 +574,7 @@ fn store_with_swapper_combo(combo_id: RecordId, slot: usize) -> (Store, Vec<u8>,
     combo.catalog_index = None;
     combo.kind = FigureKind::Swapper;
     combo.data_mode = EntityDataMode::StaticGenerated;
-    combo.character_id = 2000;
+    combo.character_id = 2004;
     combo.variant_id = None;
     combo.blob_id = None;
     combo.image_len = (top_image.len() + bottom_image.len()) as u32;
@@ -641,6 +641,19 @@ fn library_json_resolves_catalog_names_by_game_line() {
     assert!(json.contains("\"theme\":\"pirates-of-the-caribbean\""));
     assert!(json.contains("\"theme_label\":\"Pirates of the Caribbean\""));
     assert!(!json.contains("Polar Whirlwind"));
+}
+
+#[test]
+fn library_json_reports_both_swapper_combo_elements() {
+    let (store, _, _) = store_with_swapper_combo(RecordId(50), 0);
+    let json = store.catalog.library_json();
+
+    assert!(json.contains("\"swapper_top_name\":\"Blast Zone Top\""));
+    assert!(json.contains("\"swapper_top_theme\":\"fire\""));
+    assert!(json.contains("\"swapper_top_theme_label\":\"Fire\""));
+    assert!(json.contains("\"swapper_bottom_name\":\"Wash Buckler Bottom\""));
+    assert!(json.contains("\"swapper_bottom_theme\":\"air\""));
+    assert!(json.contains("\"swapper_bottom_theme_label\":\"Air\""));
 }
 
 #[test]

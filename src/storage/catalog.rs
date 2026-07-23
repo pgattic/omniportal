@@ -242,10 +242,21 @@ impl Catalog {
             let swapper_bottom_name = swapper_bottom
                 .map(|item| option_str_json(Some(item.name.as_str())))
                 .unwrap_or_else(|| String::from("null"));
+            let swapper_top_theme = option_str_json(
+                swapper_top.map(|item| skylanders_entity_element(&item).wire_name()),
+            );
+            let swapper_top_theme_label =
+                option_str_json(swapper_top.map(|item| skylanders_entity_element(&item).label()));
+            let swapper_bottom_theme = option_str_json(
+                swapper_bottom.map(|item| skylanders_entity_element(&item).wire_name()),
+            );
+            let swapper_bottom_theme_label = option_str_json(
+                swapper_bottom.map(|item| skylanders_entity_element(&item).label()),
+            );
             let theme = entity_theme(entity);
             let theme_label = entity_theme_label(entity);
             out.push_str(&format!(
-                "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"theme\":\"{}\",\"theme_label\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{},\"swapper_top_entity_id\":{},\"swapper_top_name\":{},\"swapper_bottom_entity_id\":{},\"swapper_bottom_name\":{},\"exportable\":{}}}",
+                "{{\"id\":{},\"name\":\"{}\",\"figure\":{},\"identity_id\":{},\"catalog_index\":{},\"game\":\"{}\",\"kind\":\"{}\",\"theme\":\"{}\",\"theme_label\":\"{}\",\"data_mode\":\"{}\",\"character_id\":{},\"variant_id\":{},\"blob_id\":{},\"image_len\":{},\"crc32\":{},\"swapper_top_entity_id\":{},\"swapper_top_name\":{},\"swapper_top_theme\":{},\"swapper_top_theme_label\":{},\"swapper_bottom_entity_id\":{},\"swapper_bottom_name\":{},\"swapper_bottom_theme\":{},\"swapper_bottom_theme_label\":{},\"exportable\":{}}}",
                 entity.id.0,
                 json_escape(entity.name.as_str()),
                 option_str_json(figure_name),
@@ -263,8 +274,12 @@ impl Catalog {
                 entity.image_crc32,
                 option_record_id_json(entity.swapper_top_entity_id),
                 swapper_top_name,
+                swapper_top_theme,
+                swapper_top_theme_label,
                 option_record_id_json(entity.swapper_bottom_entity_id),
                 swapper_bottom_name,
+                swapper_bottom_theme,
+                swapper_bottom_theme_label,
                 if entity.is_swapper_combo() { "false" } else { "true" }
             ));
         }
