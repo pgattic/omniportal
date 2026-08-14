@@ -15,11 +15,14 @@
 
       perSystem = { pkgs, ... }:
         let
+          esp32s3 = import ./nix/boards/esp32s3.nix { inherit pkgs; };
+
           omniportal-host-test = pkgs.writeShellApplication {
             name = "omniportal-host-test";
             runtimeInputs = [
               pkgs.cargo
               pkgs.rustc
+              pkgs.stdenv.cc
             ];
             text = ''
               unset RUSTUP_TOOLCHAIN
@@ -31,50 +34,39 @@
           };
         in
       {
-        devShells.default = pkgs.mkShell {
-          NIX_LD = pkgs.stdenv.cc.bintools.dynamicLinker;
-          NIX_LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-            pkgs.stdenv.cc.cc
-            pkgs.libusb1
-            pkgs.zlib
-          ];
+        packages = {
+          esp-rust = esp32s3.espRust;
+          esp-clang = esp32s3.espClang;
+          xtensa-esp-elf = esp32s3.xtensaEspElf;
+        };
 
-          packages = with pkgs; [
-            espflash
-            espup
-            ldproxy
-            file
+        apps = {
+          esp32s3-build = {
+            type = "app";
+            program = "${esp32s3.firmware-build}/bin/omniportal-esp32s3-build";
+          };
+
+          esp32s3-flash = {
+            type = "app";
+            program = "${esp32s3.firmware-flash}/bin/omniportal-esp32s3-flash";
+          };
+
+          host-test = {
+            type = "app";
+            program = "${omniportal-host-test}/bin/omniportal-host-test";
+          };
+        };
+
+        devShells.default = pkgs.mkShell {
+          packages = esp32s3.packages ++ (with pkgs; [
             omniportal-host-test
-            libusb1
-            patchelf
-            pkg-config
             (python3.withPackages (python-pkgs: [
               python-pkgs.pyusb
             ]))
-            rustup
             udev
-          ];
+          ]);
 
-          shellHook = ''
-            export RUSTUP_HOME="''${RUSTUP_HOME:-$PWD/.rustup}"
-            export CARGO_HOME="''${CARGO_HOME:-$PWD/.cargo-home}"
-            export RUSTUP_TOOLCHAIN="''${RUSTUP_TOOLCHAIN:-esp}"
-            export CARGO_BUILD_TARGET="''${CARGO_BUILD_TARGET:-xtensa-esp32s3-none-elf}"
-            export CARGO_UNSTABLE_BUILD_STD="''${CARGO_UNSTABLE_BUILD_STD:-core,alloc}"
-            export PATH="$CARGO_HOME/bin:$PATH"
-            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.libusb1 ]}:''${LD_LIBRARY_PATH:-}"
-
-            if [ -f "$PWD/export-esp.sh" ]; then
-              source "$PWD/export-esp.sh"
-            fi
-
-            echo "ESP32-S3 dev shell"
-            echo "  first setup: espup install --targets esp32s3 --export-file $PWD/export-esp.sh"
-            echo "  on NixOS:     scripts/patch-esp-toolchain-nixos.sh"
-            echo "  build:       cargo build"
-            echo "  host tests:  omniportal-host-test"
-            echo "  flash:       espflash flash --partition-table partitions/esp32s3-n16r8.csv --monitor target/xtensa-esp32s3-none-elf/debug/omniportal"
-          '';
+          shellHook = esp32s3.shellHook;
         };
       };
     };

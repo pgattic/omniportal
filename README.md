@@ -11,29 +11,22 @@ Enter the Nix development shell:
 nix develop --builders ''
 ```
 
-Bootstrap the ESP Rust toolchain locally:
+Build the release firmware:
 
 ```sh
-espup install --targets esp32s3 --export-file "$PWD/export-esp.sh"
-scripts/patch-esp-toolchain-nixos.sh
-```
-
-Build the firmware:
-
-```sh
-scripts/build-firmware.sh
+nix run .#esp32s3-build
 ```
 
 Run host-side unit tests:
 
 ```sh
-omniportal-host-test
+nix run .#host-test
 ```
 
 Flash and monitor:
 
 ```sh
-scripts/flash-firmware.sh /dev/ttyACM0
+nix run .#esp32s3-flash -- /dev/ttyACM0
 ```
 
 ## Code Structure
